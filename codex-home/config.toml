@@ -1,0 +1,12 @@
+# 面板专用 Codex 配置（面板启动 Codex 时把 CODEX_HOME 指向这个目录），与你日常的配置隔离
+# 把 base_url 换成你的 OpenAI 兼容中转站，key 写在 ../secrets.env
+model_provider = "relay"
+model = "gpt-5.5"
+model_reasoning_effort = "medium"
+
+[model_providers.relay]
+name = "relay"
+base_url = "https://your-relay.example.com/v1"
+wire_api = "responses"
+env_key = "RELAY_CODEX_KEY"
+requires_openai_auth = false

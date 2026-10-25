@@ -1,0 +1,14 @@
+# 面板专用 Grok 配置（面板启动 Grok 时把 GROK_HOME 指向这个目录），与你日常的配置隔离
+# 把 base_url 换成你的 OpenAI 兼容中转站，key 写在 ../secrets.env
+[models]
+default = "relay-grok"
+
+[model."relay-grok"]
+model = "grok-4"
+base_url = "https://your-relay.example.com/v1"
+name = "relay · grok-4"
+api_backend = "responses"
+env_key = "RELAY_GROK_KEY"
+
+[ui]
+permission_mode = "always-approve"

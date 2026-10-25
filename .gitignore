@@ -1,0 +1,10 @@
+secrets.env
+panel.config.json
+logs/
+projects/
+*.bak.*
+codex-home/*
+!codex-home/config.toml
+grok-home/*
+!grok-home/config.toml
+node_modules/

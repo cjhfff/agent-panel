@@ -1,0 +1,158 @@
+{
+  "_说明": "面板里的「设置」会改这个文件。{prompt}=指向任务文件的短指令，{cwd}=项目根目录，{perm}=按权限档位展开的参数，{here}=面板目录。",
+  "agents": [
+    {
+      "id": "claude",
+      "name": "Claude Code",
+      "enabled": true,
+      "cmd": "claude",
+      "args": [
+        "-p",
+        "{prompt}",
+        "{perm}"
+      ],
+      "permission": "max",
+      "perm": {
+        "max": {
+          "args": [
+            "--dangerously-skip-permissions"
+          ]
+        },
+        "safe": {
+          "args": [
+            "--permission-mode",
+            "acceptEdits"
+          ]
+        }
+      },
+      "modelFlag": "--model",
+      "model": "",
+      "strengths": "架构设计、复杂推理、代码评审、拆解规划"
+    },
+    {
+      "id": "codex",
+      "name": "Codex",
+      "enabled": true,
+      "cmd": "codex",
+      "args": [
+        "exec",
+        "--skip-git-repo-check",
+        "{perm}",
+        "-C",
+        "{cwd}",
+        "{prompt}"
+      ],
+      "permission": "max",
+      "perm": {
+        "max": {
+          "args": [
+            "--dangerously-bypass-approvals-and-sandbox"
+          ]
+        },
+        "safe": {
+          "args": [
+            "-s",
+            "workspace-write"
+          ]
+        }
+      },
+      "env": {
+        "CODEX_HOME": "{here}/codex-home"
+      },
+      "envFile": "secrets.env",
+      "homeConfig": "codex-home/config.toml",
+      "strengths": "按规格实现、改代码、补单元测试"
+    },
+    {
+      "id": "gemini",
+      "name": "Gemini CLI",
+      "enabled": true,
+      "cmd": "gemini",
+      "args": [
+        "-p",
+        "{prompt}",
+        "{perm}"
+      ],
+      "permission": "max",
+      "perm": {
+        "max": {
+          "args": [
+            "--yolo"
+          ]
+        },
+        "safe": {
+          "args": [
+            "--approval-mode",
+            "auto_edit"
+          ]
+        }
+      },
+      "modelFlag": "-m",
+      "model": "",
+      "strengths": "超长上下文、通读文档与数据手册、调研"
+    },
+    {
+      "id": "grok",
+      "name": "Grok",
+      "enabled": true,
+      "cmd": "grok",
+      "args": [
+        "-p",
+        "{prompt}",
+        "--cwd",
+        "{cwd}",
+        "{perm}",
+        "--output-format",
+        "streaming-json"
+      ],
+      "permission": "max",
+      "perm": {
+        "max": {
+          "args": [
+            "--always-approve",
+            "--permission-mode",
+            "bypassPermissions"
+          ]
+        },
+        "safe": {
+          "args": [
+            "--permission-mode",
+            "acceptEdits"
+          ]
+        }
+      },
+      "env": {
+        "GROK_HOME": "{here}/grok-home"
+      },
+      "envFile": "secrets.env",
+      "homeConfig": "grok-home/config.toml",
+      "strengths": "快速实现、脚本与工具类代码",
+      "stream": "grok-ndjson"
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek Harness",
+      "enabled": true,
+      "cmd": "dsh",
+      "args": [
+        "--profile",
+        "headless",
+        "{prompt}"
+      ],
+      "permission": "max",
+      "perm": {
+        "max": {
+          "env": {
+            "DSH_PERMISSION_MODE": "danger-full-access"
+          }
+        },
+        "safe": {
+          "env": {
+            "DSH_PERMISSION_MODE": "workspace-write"
+          }
+        }
+      },
+      "strengths": "低成本批量任务、中文文档、简单模块"
+    }
+  ]
+}

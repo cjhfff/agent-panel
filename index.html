@@ -1,0 +1,1213 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent 统筹面板</title>
+<style>
+  :root {
+    /* 仪表盘配色：瓷白面板 + 钴蓝操作 + 指示灯 */
+    --bg: #eef1f5; --panel: #fbfcfe; --sub: #f3f5f9; --line: #dde2ea; --line-strong: #c9d0db;
+    --text: #141b26; --muted: #5b6678; --faint: #8a94a6;
+    --accent: #3048d8; --accent-2: #4a63ee; --accent-weak: #e9edfd; --accent-ring: rgba(48,72,216,.28);
+    --ok: #15996a; --warn: #e39a1f; --bad: #e5484d; --grid: #cfd6e1;
+    --shadow-sm: 0 1px 2px rgba(20,27,38,.05); --shadow: 0 1px 0 rgba(255,255,255,.8) inset, 0 1px 2px rgba(20,27,38,.05), 0 10px 28px -14px rgba(20,27,38,.18);
+    --font-ui: "Segoe UI Variable Text", "Segoe UI", "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
+    --font-display: "Segoe UI Variable Display", "Segoe UI", "HarmonyOS Sans SC", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
+    --font-mono: "Cascadia Mono", "JetBrains Mono", Consolas, ui-monospace, monospace;
+    --claude: #c2410c; --codex: #0f766e; --gemini: #2563eb; --grok: #3d4656; --deepseek: #4f46e5;
+    --t-start: #15996a; --t-agent: #3048d8; --t-dev: #7a5af8; --t-human: #e39a1f; --t-end: #5b6678;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0e1218; --panel: #161c25; --sub: #121821; --line: #253040; --line-strong: #33415a;
+      --text: #e6eaf0; --muted: #8b96a8; --faint: #66728a;
+      --accent: #6e86ff; --accent-2: #8a9dff; --accent-weak: #1a2340; --accent-ring: rgba(110,134,255,.32);
+      --ok: #33c48d; --warn: #f2b04a; --bad: #ff6b6f; --grid: #222c3a;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,.35); --shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 1px 2px rgba(0,0,0,.4), 0 12px 30px -16px rgba(0,0,0,.6);
+      --claude: #fb923c; --codex: #2dd4bf; --gemini: #60a5fa; --grok: #cbd5e1; --deepseek: #a5b4fc; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; font: 14px/1.55 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); display: grid; grid-template-columns: 76px 1fr; grid-template-rows: 52px 1fr; }
+  input, select, button, textarea { font: inherit; color: inherit; }
+  input, select, textarea { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; }
+  textarea { width: 100%; resize: vertical; }
+  button { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; cursor: pointer; white-space: nowrap; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.ok { color: var(--ok); } button.bad { color: var(--bad); }
+  button.link { border: 0; background: none; padding: 0; color: var(--accent); }
+  button.ghost { border-color: transparent; background: none; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .muted { color: var(--muted); } .small { font-size: 12px; } .grow { flex: 1; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--panel); }
+  .chip.ok { color: var(--ok); border-color: var(--ok); } .chip.warn { color: var(--warn); border-color: var(--warn); } .chip.bad { color: var(--bad); border-color: var(--bad); } .chip.run { color: var(--accent); border-color: var(--accent); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+  .pulse { animation: pulse 1.2s infinite; } @keyframes pulse { 50% { opacity: .35; } }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; padding: 5px 12px; }
+  .seg button.on { background: var(--accent); color: #fff; }
+  .clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; cursor: pointer; }
+  .clamp2.open { display: block; }
+  details.more > summary { cursor: pointer; font-size: 12px; color: var(--muted); list-style: none; margin-top: 6px; }
+  details.more > summary::before { content: '▸ '; } details.more[open] > summary::before { content: '▾ '; }
+  .agent-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); font-size: 12px; }
+  .story .top { display: flex; gap: 8px; align-items: flex-start; }
+  .story .num { font-size: 12px; color: var(--muted); padding-top: 1px; }
+  .owner { font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+
+  /* 框架 */
+  header { grid-column: 1 / 3; display: flex; align-items: center; gap: 10px; padding: 0 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 15px; margin: 0 8px 0 0; display: flex; gap: 8px; align-items: center; }
+  header h1 .logo { width: 26px; height: 26px; border-radius: 7px; background: linear-gradient(135deg, var(--accent), #7a5af8); color: #fff; display: grid; place-items: center; font-size: 14px; }
+  nav { background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 4px; }
+  nav button { width: 64px; border: 0; background: none; padding: 8px 0; border-radius: 10px; display: grid; justify-items: center; gap: 2px; font-size: 12px; color: var(--muted); }
+  nav button .i { font-size: 18px; line-height: 1; }
+  nav button.on { background: var(--accent-weak); color: var(--accent); }
+  main { overflow: auto; position: relative; }
+  .page { padding: 16px 20px 40px; display: grid; gap: 14px; max-width: 1600px; }
+
+  /* 画布 */
+  .wf { position: absolute; inset: 0; display: grid; grid-template-rows: 48px 1fr; }
+  .wf-bar { display: flex; align-items: center; gap: 8px; padding: 0 14px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .canvas { position: relative; overflow: hidden; background-color: var(--bg); background-image: radial-gradient(var(--grid) 1px, transparent 1px); background-size: 20px 20px; cursor: grab; }
+  .canvas.panning { cursor: grabbing; }
+  .world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+  .edges { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+  .edges path.e { fill: none; stroke: #98a2b3; stroke-width: 2; }
+  .edges path.e.sel { stroke: var(--accent); stroke-width: 3; }
+  .edges path.e.live { stroke: var(--accent); stroke-dasharray: 6 4; animation: dash 1s linear infinite; }
+  .edges path.hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
+  @keyframes dash { to { stroke-dashoffset: -20; } }
+  .node { position: absolute; width: 230px; background: var(--panel); border: 1.5px solid var(--line); border-radius: 14px; box-shadow: 0 1px 3px rgba(16,24,40,.08); cursor: pointer; user-select: none; }
+  .node:hover { box-shadow: 0 4px 12px rgba(16,24,40,.12); }
+  .node.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
+  .node.s-running { border-color: var(--accent); } .node.s-waiting { border-color: var(--warn); } .node.s-failed { border-color: var(--bad); } .node.s-done { border-color: color-mix(in srgb, var(--ok) 55%, var(--line)); }
+  .node .nh { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; }
+  .node .ic { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; color: #fff; font-size: 13px; flex: none; background: var(--tc); }
+  .node .tt { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .node .nb { padding: 0 12px 10px; display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  .node .nb .ln { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .node .h { position: absolute; top: 19px; width: 14px; height: 14px; border-radius: 50%; background: var(--panel); border: 2px solid var(--accent); }
+  .node .h.in { left: -8px; } .node .h.out { right: -8px; cursor: crosshair; }
+  .node .h.out:hover { background: var(--accent); }
+  .zoom { position: absolute; left: 14px; bottom: 14px; display: flex; gap: 4px; }
+  .menu { position: absolute; z-index: 10; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(16,24,40,.15); padding: 6px; min-width: 220px; }
+  .menu div { padding: 7px 10px; border-radius: 6px; cursor: pointer; display: flex; gap: 8px; align-items: center; } .menu div:hover { background: var(--accent-weak); }
+  .menu .ic { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: #fff; font-size: 12px; background: var(--tc); }
+
+  /* 右侧节点面板 */
+  /* Story 流程（泳道） */
+  .flow { overflow: auto; padding: 14px 18px 60px; }
+  .flow-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .lane { display: grid; grid-template-columns: 290px 1fr; gap: 14px; align-items: center; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; transition: box-shadow .18s; }
+  .lane:hover { box-shadow: 0 4px 14px rgba(16,24,40,.07); }
+  .lane.rw { border-left: 3px solid var(--bad); }
+  .lane-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; min-width: 0; }
+  .lane-head .ttl { flex-basis: 100%; font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lane-head .num { font-size: 12px; color: var(--muted); }
+  .lane-track { display: flex; align-items: center; gap: 4px; overflow-x: auto; padding: 4px 2px 6px; }
+  .ev { display: inline-flex; flex-direction: column; gap: 1px; padding: 5px 10px; border-radius: 10px; border: 1px solid var(--line); border-left: 3px solid var(--c, var(--line)); background: var(--sub); white-space: nowrap; font-size: 12px; flex: none; transition: box-shadow .15s, transform .15s; }
+  .ev[data-run] { cursor: pointer; } .ev[data-run]:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(16,24,40,.12); }
+  .ev .t { font-weight: 600; } .ev .s { color: var(--muted); font-size: 11px; max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
+  .ev.bad { background: color-mix(in srgb, var(--bad) 9%, var(--panel)); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); border-left-color: var(--bad); }
+  .ev.ok { background: color-mix(in srgb, var(--ok) 9%, var(--panel)); border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); border-left-color: var(--ok); }
+  .ev.warn { background: color-mix(in srgb, var(--warn) 9%, var(--panel)); border-left-color: var(--warn); }
+  .ev.run { animation: glow 1.8s ease-in-out infinite; }
+  .ev.new { animation: chipIn .3s cubic-bezier(.2,.8,.2,1) both; }
+  .ev.new.run { animation: chipIn .3s cubic-bezier(.2,.8,.2,1) both, glow 1.8s ease-in-out .3s infinite; }
+  @keyframes chipIn { from { opacity: 0; transform: translateX(-8px) scale(.96); } }
+  .arr { color: var(--muted); font-size: 13px; padding: 0 1px; flex: none; }
+  .arr.loop { color: var(--bad); font-weight: 700; font-size: 16px; animation: spinIn .5s ease-out both; }
+  @keyframes spinIn { from { transform: rotate(-180deg); opacity: 0; } }
+  .badge-r { display: inline-grid; place-items: center; min-width: 18px; height: 16px; border-radius: 8px; background: var(--bad); color: #fff; font-size: 10px; padding: 0 5px; margin-left: 4px; }
+  .mini { font-size: 12px; display: grid; grid-template-columns: 34px 1fr auto; gap: 6px; align-items: center; padding: 5px 0; border-bottom: 1px dashed var(--line); }
+  .mini .ic2 { letter-spacing: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .side { position: absolute; top: 48px; right: 0; bottom: 0; width: 400px; background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; overflow-x: hidden; box-shadow: -8px 0 24px rgba(16,24,40,.06); overflow-wrap: anywhere; }
+  .side .sb > * { min-width: 0; }
+  .side .sh { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); z-index: 1; }
+  .side .sb { padding: 14px 16px; display: grid; gap: 12px; }
+  .field { display: grid; gap: 5px; } .field > span { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .skills-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .skills-chips .chip { color: var(--text); }
+  .runbox { background: var(--sub); border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; font-size: 13px; }
+  .liveline { font: 12px/1.4 ui-monospace, Consolas, monospace; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* 看板 */
+  .agents { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+  .agent { border-left: 4px solid var(--c); padding: 10px 12px; } .agent .name { font-weight: 600; color: var(--c); }
+  .board { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; align-items: start; }
+  .col { background: var(--sub); border-radius: 12px; padding: 8px; min-height: 120px; }
+  .col h3 { font-size: 13px; margin: 2px 4px 8px; color: var(--muted); display: flex; justify-content: space-between; }
+  .story { margin-bottom: 8px; padding: 10px; border-left: 3px solid var(--c, var(--line)); }
+  .story .title { font-weight: 600; margin: 2px 0 6px; } .story select { width: 100%; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; border-top: 1px dashed var(--line); padding-top: 6px; }
+  .box { font-size: 12px; margin-top: 6px; background: var(--sub); border-radius: 8px; padding: 6px 8px; }
+  .files button { display: block; text-align: left; font: 12px ui-monospace, Consolas, monospace; }
+
+  /* 技能库 */
+  .sk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .sk { display: grid; gap: 6px; align-content: start; }
+  .sk .nm { font-weight: 600; } .sk .ds { font-size: 12px; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; } .tabs button.on { border-color: var(--accent); color: var(--accent); background: var(--accent-weak); }
+  .pick-list { max-height: 52vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+  .pick-list label { display: grid; grid-template-columns: 20px 1fr; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .pick-list label:hover { background: var(--accent-weak); }
+
+  /* 通用 */
+  .md h1 { font-size: 20px; } .md h2 { font-size: 17px; border-bottom: 1px solid var(--line); padding-bottom: 4px; } .md h3 { font-size: 15px; }
+  .md table { border-collapse: collapse; margin: 8px 0; } .md td, .md th { border: 1px solid var(--line); padding: 4px 8px; vertical-align: top; }
+  .md code { background: var(--sub); padding: 0 4px; border-radius: 4px; font-size: 12px; } .md pre { background: var(--sub); padding: 10px; border-radius: 8px; overflow: auto; } .md pre code { background: none; padding: 0; }
+  .md blockquote { margin: 8px 0; padding: 4px 12px; border-left: 3px solid var(--line); color: var(--muted); }
+  table.list { width: 100%; border-collapse: collapse; font-size: 12px; } table.list td, table.list th { text-align: left; padding: 6px; border-bottom: 1px solid var(--line); }
+  .st-running { color: var(--accent); } .st-finished { color: var(--ok); } .st-failed { color: var(--bad); } .st-cancelled, .st-queued { color: var(--muted); }
+  /* 网页终端 */
+  .term { position: fixed; left: 76px; right: 0; bottom: 0; height: 44vh; background: #0d1117; color: #c9d1d9; border-top: 1px solid #30363d;
+    box-shadow: 0 -16px 40px rgba(0,0,0,.28); transform: translateY(105%); transition: transform .34s cubic-bezier(.2,.8,.2,1), height .25s ease; z-index: 15;
+    display: grid; grid-template-rows: 38px 1fr 28px; font: 12.5px/1.6 "Cascadia Code", "Cascadia Mono", Consolas, ui-monospace, monospace; }
+  .term.open { transform: translateY(0); } .term.max { height: 82vh; }
+  body.term-open main { padding-bottom: 44vh; }
+  .term-tabs { display: flex; align-items: flex-end; gap: 2px; padding: 0 8px; background: #161b22; border-bottom: 1px solid #30363d; overflow-x: auto; font: 12px system-ui, "Microsoft YaHei", sans-serif; }
+  .term-tab { display: flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: 8px 8px 0 0; color: #8b949e; cursor: pointer; white-space: nowrap; transition: background .18s, color .18s; position: relative; }
+  .term-tab:hover { color: #e6edf3; } .term-tab.on { background: #0d1117; color: #e6edf3; }
+  .term-tab.on::after { content: ''; position: absolute; left: 10px; right: 10px; bottom: 0; height: 2px; border-radius: 2px; background: var(--tc, #58a6ff); }
+  .term-tab .x { opacity: 0; transition: opacity .15s; padding: 0 2px; } .term-tab:hover .x { opacity: .6; } .term-tab .x:hover { opacity: 1; }
+  .term-tab .st { width: 8px; height: 8px; border-radius: 50%; background: #6e7681; }
+  .term-tab .st.run { background: #3fb950; box-shadow: 0 0 0 0 rgba(63,185,80,.6); animation: ping 1.6s infinite; }
+  .term-tab .st.ok { background: #3fb950; } .term-tab .st.bad { background: #f85149; }
+  .term-tab.flash { animation: tabflash .9s ease 2; }
+  @keyframes ping { 0% { box-shadow: 0 0 0 0 rgba(63,185,80,.55); } 70% { box-shadow: 0 0 0 7px rgba(63,185,80,0); } 100% { box-shadow: 0 0 0 0 rgba(63,185,80,0); } }
+  @keyframes tabflash { 50% { background: rgba(88,166,255,.25); } }
+  .term-tools { margin-left: auto; display: flex; gap: 4px; padding-bottom: 5px; }
+  .term-tools button { background: none; border: 0; color: #8b949e; padding: 3px 8px; border-radius: 6px; } .term-tools button:hover { background: #21262d; color: #e6edf3; }
+  .term-body { overflow: auto; padding: 10px 16px 18px; position: relative; }
+  .term-body .tb { display: none; } .term-body .tb.on { display: block; }
+  .tl { white-space: pre-wrap; word-break: break-word; animation: tlIn .2s ease-out both; }
+  @keyframes tlIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  .tl.cmd { color: #79c0ff; margin-top: 6px; } .tl.cmd::before { content: '❯ '; color: #3fb950; font-weight: 700; }
+  .tl.hdr { color: #d2a8ff; font-weight: 600; margin-top: 10px; } .tl.say { color: #f0f6fc; }
+  .tl.ok { color: #3fb950; } .tl.err { color: #ff7b72; } .tl.add { color: #7ee787; } .tl.del { color: #ffa198; } .tl.warn { color: #e3b341; } .tl.dim { color: #6e7681; }
+  .tl.launch { color: #8b949e; border-bottom: 1px dashed #30363d; padding-bottom: 8px; margin-bottom: 6px; }
+  .cursor { display: inline-block; width: 8px; height: 15px; background: #c9d1d9; vertical-align: -3px; margin-left: 2px; animation: blink 1.05s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .term-foot { display: flex; gap: 14px; align-items: center; padding: 0 14px; background: #161b22; border-top: 1px solid #30363d; color: #8b949e; font: 11.5px system-ui, "Microsoft YaHei", sans-serif; overflow: hidden; white-space: nowrap; }
+  .term-foot .cmdline { overflow: hidden; text-overflow: ellipsis; font-family: Consolas, ui-monospace, monospace; }
+  .term-empty { color: #6e7681; padding: 30px; text-align: center; font-family: system-ui; }
+  .jump { position: absolute; right: 18px; bottom: 12px; background: #1f6feb; color: #fff; border: 0; border-radius: 999px; padding: 4px 12px; font: 12px system-ui; box-shadow: 0 4px 12px rgba(0,0,0,.3); animation: tlIn .2s ease-out; }
+  #termBtn .badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; border-radius: 9px; background: var(--accent); color: #fff; font-size: 11px; margin-left: 4px; padding: 0 5px; }
+  /* 动效 */
+  .page.enter { animation: fadeUp .26s cubic-bezier(.2,.8,.2,1) both; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .node { transition: box-shadow .2s, border-color .2s, transform .15s; }
+  .node.s-running { animation: glow 1.8s ease-in-out infinite; }
+  @keyframes glow { 0%, 100% { box-shadow: 0 1px 3px rgba(16,24,40,.08); } 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent), 0 8px 22px rgba(21,94,239,.16); } }
+  .card.story { transition: transform .16s ease, box-shadow .16s ease; } .card.story:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(16,24,40,.08); }
+  .card.story.running { animation: glow 1.8s ease-in-out infinite; }
+  .chip, .seg button, nav button, button { transition: background .18s, color .18s, border-color .18s, box-shadow .18s; }
+  dialog[open] { animation: pop .2s cubic-bezier(.2,.8,.2,1); } @keyframes pop { from { opacity: 0; transform: translateY(6px) scale(.98); } }
+  .toast { animation: toastIn .25s cubic-bezier(.2,.8,.2,1); } @keyframes toastIn { from { opacity: 0; transform: translateY(10px); } }
+  .liveline { transition: color .2s; }
+  dialog { width: min(1040px, 94vw); max-height: 88vh; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--text); padding: 0; }
+  dialog.narrow { width: min(600px, 94vw); } dialog::backdrop { background: rgba(16,24,40,.45); }
+  .dlg-head { display: flex; gap: 10px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); z-index: 1; }
+  .dlg-body { padding: 14px 16px; overflow: auto; max-height: calc(88vh - 58px); }
+  pre.log { margin: 0; white-space: pre-wrap; word-break: break-word; font: 12px/1.5 ui-monospace, Consolas, monospace; }
+  .diff div { font: 12px/1.5 ui-monospace, Consolas, monospace; white-space: pre-wrap; padding: 0 6px; }
+  .diff .a { background: color-mix(in srgb, var(--ok) 15%, transparent); } .diff .d { background: color-mix(in srgb, var(--bad) 15%, transparent); } .diff .h { color: var(--muted); }
+  .form { display: grid; gap: 10px; } .form label { display: grid; gap: 4px; font-size: 13px; }
+  .fs-list { max-height: 50vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+  .fs-list div { padding: 5px 10px; cursor: pointer; border-bottom: 1px solid var(--line); } .fs-list div:hover { background: var(--accent-weak); }
+  .settings-agent { border-left: 4px solid var(--c); margin-bottom: 12px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .toast { position: fixed; right: 16px; bottom: 16px; padding: 10px 14px; border-radius: 10px; max-width: 460px; display: none; color: #fff; z-index: 20; }
+  .welcome { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; max-width: 900px; margin: 60px auto; }
+  .welcome .card { padding: 24px; cursor: pointer; } .welcome .card:hover { border-color: var(--accent); }
+  @media (max-width: 1100px) { .agents, .board { grid-template-columns: repeat(2, minmax(0, 1fr)); } .grid2, .welcome { grid-template-columns: 1fr; } .side { width: min(400px, 90vw); } }
+
+  /* ================= 主题 v2：仪表盘 ================= */
+  body { font-family: var(--font-ui); font-size: 14px; letter-spacing: .005em; -webkit-font-smoothing: antialiased;
+    background: radial-gradient(1200px 600px at 100% -10%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 60%), var(--bg); }
+  h1, h2, h3, .page h2 { font-family: var(--font-display); letter-spacing: -.01em; }
+  .page h2 { font-size: 20px; font-weight: 650; }
+  ::selection { background: var(--accent-ring); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+  * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+  .num, .badge, [data-since], [data-ago], table.list td:nth-child(5) { font-variant-numeric: tabular-nums; }
+
+  /* 输入与按钮 */
+  input, select, textarea { background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 7px 10px; transition: border-color .15s, box-shadow .15s; }
+  input:hover, select:hover, textarea:hover { border-color: var(--line-strong); }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+  button { border-radius: 9px; padding: 7px 13px; font-weight: 500; box-shadow: var(--shadow-sm); transition: background .15s, border-color .15s, box-shadow .15s, transform .12s, color .15s; }
+  button:hover:not(:disabled) { border-color: var(--line-strong); background: color-mix(in srgb, var(--panel) 85%, var(--accent-weak)); }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button.primary { background: linear-gradient(180deg, var(--accent-2), var(--accent)); border-color: color-mix(in srgb, var(--accent) 80%, black); color: #fff;
+    box-shadow: 0 1px 0 rgba(255,255,255,.25) inset, 0 1px 2px rgba(20,27,38,.15), 0 6px 14px -6px var(--accent-ring); }
+  button.primary:hover:not(:disabled) { background: linear-gradient(180deg, var(--accent-2), color-mix(in srgb, var(--accent) 90%, black)); border-color: color-mix(in srgb, var(--accent) 70%, black); }
+  button.ghost, button.link { box-shadow: none; }
+  button.link:hover:not(:disabled) { background: none; text-decoration: underline; text-underline-offset: 3px; }
+  button.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, var(--line)); }
+  button.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 30%, var(--line)); }
+  .seg { border-radius: 10px; padding: 2px; gap: 2px; background: var(--sub); border-color: var(--line); }
+  .seg button { border-radius: 8px; box-shadow: none; padding: 5px 12px; color: var(--muted); background: none; }
+  .seg button.on { background: var(--panel); color: var(--text); box-shadow: var(--shadow-sm), 0 0 0 1px var(--line); }
+  .seg button.on::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+
+  /* 指示灯式状态标签 */
+  .chip { border-radius: 999px; padding: 2px 9px; font-size: 12px; gap: 6px; background: var(--panel); border-color: var(--line); color: var(--muted); font-weight: 500; }
+  .chip.ok, .chip.warn, .chip.bad, .chip.run { border-color: var(--line); color: var(--text); }
+  .chip.ok::before, .chip.warn::before, .chip.bad::before, .chip.run::before { content: ''; width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .chip.ok::before { background: var(--ok); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 18%, transparent); }
+  .chip.warn::before { background: var(--warn); box-shadow: 0 0 0 2px color-mix(in srgb, var(--warn) 22%, transparent), 0 0 8px var(--warn); }
+  .chip.bad::before { background: var(--bad); box-shadow: 0 0 0 2px color-mix(in srgb, var(--bad) 20%, transparent), 0 0 8px var(--bad); }
+  .chip.run::before { background: var(--accent); animation: led 1.6s ease-in-out infinite; }
+  @keyframes led { 0%, 100% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent); } 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 10%, transparent), 0 0 10px var(--accent); } }
+  .dot { box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 0%, transparent); }
+
+  /* 卡片 */
+  .card { border-radius: 14px; border-color: var(--line); box-shadow: var(--shadow); padding: 16px 18px; }
+  .box { border-radius: 10px; background: var(--sub); border: 1px solid color-mix(in srgb, var(--line) 70%, transparent); }
+
+  /* 顶栏 */
+  header { background: color-mix(in srgb, var(--panel) 82%, transparent); backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--line); gap: 12px; padding: 0 18px; z-index: 6; }
+  header h1 { font-size: 15px; font-weight: 650; gap: 10px; }
+  header h1 .logo { width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(145deg, #1d2a6b, var(--accent)); box-shadow: 0 1px 0 rgba(255,255,255,.25) inset, 0 4px 12px -4px var(--accent-ring); }
+  header h1 .logo svg { width: 18px; height: 18px; }
+  header h1 .tag { font: 600 10px/1 var(--font-mono); letter-spacing: .14em; color: var(--faint); border: 1px solid var(--line); border-radius: 5px; padding: 3px 5px; }
+  header select#projectSel { font-weight: 600; background: var(--sub); }
+  #termBtn, #leaderSkills { display: inline-flex; align-items: center; gap: 6px; }
+  #termBtn svg, #leaderSkills svg { width: 15px; height: 15px; }
+  #leaderBox { gap: 6px; color: var(--muted); }
+
+  /* 侧栏 + 团队指示灯 */
+  nav { padding: 12px 0 14px; gap: 2px; background: color-mix(in srgb, var(--panel) 88%, transparent); }
+  nav button { position: relative; width: 62px; padding: 9px 0 7px; border-radius: 11px; gap: 4px; font-size: 11.5px; box-shadow: none; color: var(--muted); }
+  nav button:hover:not(:disabled) { background: var(--sub); color: var(--text); border-color: transparent; }
+  nav button .i { display: grid; place-items: center; }
+  nav button .i svg { width: 20px; height: 20px; }
+  nav button.on { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
+  nav button.on::before { content: ''; position: absolute; left: -7px; top: 50%; width: 3px; height: 22px; margin-top: -11px; border-radius: 0 3px 3px 0; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+  .crew { margin-top: auto; display: grid; gap: 7px; justify-items: center; padding-top: 12px; border-top: 1px solid var(--line); width: 52px; }
+  .crew .lbl { font: 600 9px/1 var(--font-mono); letter-spacing: .18em; color: var(--faint); }
+  .lamp { position: relative; width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; font: 650 11px/1 var(--font-mono); letter-spacing: .02em;
+    color: color-mix(in srgb, var(--c) 85%, var(--text)); background: color-mix(in srgb, var(--c) 9%, var(--panel)); border: 1px solid color-mix(in srgb, var(--c) 28%, var(--line)); cursor: default; transition: box-shadow .3s, opacity .3s; }
+  .lamp::after { content: ''; position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border-radius: 50%; background: var(--line-strong); border: 2px solid var(--panel); }
+  .lamp.idle::after { background: var(--ok); }
+  .lamp.busy { box-shadow: 0 0 0 1px color-mix(in srgb, var(--c) 45%, transparent), 0 0 18px -2px color-mix(in srgb, var(--c) 55%, transparent); }
+  .lamp.busy::after { background: var(--c); animation: lampGlow 1.4s ease-in-out infinite; }
+  .lamp.off { opacity: .38; filter: grayscale(1); }
+  .lamp.leader { outline: 1.5px dashed color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 2px; }
+  @keyframes lampGlow { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c) 60%, transparent); } 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--c) 0%, transparent), 0 0 10px var(--c); } }
+
+  /* 页面 */
+  .page { padding: 20px 24px 48px; gap: 16px; }
+  .agents { gap: 12px; }
+  .agent-chip { padding: 5px 11px 5px 9px; border-color: var(--line); box-shadow: var(--shadow-sm); }
+  .board { gap: 12px; }
+  .col { background: color-mix(in srgb, var(--sub) 70%, transparent); border: 1px solid color-mix(in srgb, var(--line) 70%, transparent); border-radius: 14px; padding: 10px; }
+  .col h3 { font-size: 12px; font-weight: 650; letter-spacing: .04em; color: var(--muted); margin: 2px 4px 10px; }
+  .col h3 span:last-child { font: 600 11px/18px var(--font-mono); min-width: 22px; text-align: center; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); color: var(--text); }
+  .story { padding: 12px 12px 10px; border-left: 3px solid var(--c, var(--line)); }
+  .story .title { font-size: 13.5px; font-weight: 600; line-height: 1.45; }
+  .story .num { font: 600 11px/1.6 var(--font-mono); color: var(--faint); }
+  .card.story.running { border-left-color: var(--c); }
+  .hint { border-top-style: dashed; }
+
+  /* 工作流画布 */
+  .wf-bar { background: color-mix(in srgb, var(--panel) 85%, transparent); backdrop-filter: blur(8px); }
+  .canvas { background-color: var(--bg); background-image: radial-gradient(var(--grid) 1.1px, transparent 1.2px); background-size: 22px 22px; }
+  .node { border-radius: 16px; border: 1px solid var(--line); box-shadow: var(--shadow); }
+  .node:hover { box-shadow: var(--shadow), 0 10px 26px -12px rgba(20,27,38,.25); transform: translateY(-1px); }
+  .node.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring), var(--shadow); }
+  .node .ic { border-radius: 9px; box-shadow: 0 1px 0 rgba(255,255,255,.25) inset, 0 4px 10px -4px color-mix(in srgb, var(--tc) 60%, transparent); }
+  .node .tt { font-weight: 650; }
+  .node .h { border-width: 2px; background: var(--panel); }
+  .edges path.e { stroke: color-mix(in srgb, var(--muted) 55%, transparent); stroke-width: 1.8; }
+  .side { box-shadow: -18px 0 40px -24px rgba(20,27,38,.35); }
+  .runbox { border-radius: 12px; border: 1px solid var(--line); }
+
+  /* 技能库、表格、弹窗 */
+  .sk { transition: transform .15s, box-shadow .15s; } .sk:hover { transform: translateY(-1px); box-shadow: var(--shadow), 0 12px 28px -16px rgba(20,27,38,.3); }
+  .sk .nm { font-family: var(--font-mono); font-size: 13px; }
+  .tabs button { border-radius: 999px; padding: 5px 12px; box-shadow: none; }
+  .tabs button.on { border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); background: var(--accent-weak); color: var(--accent); font-weight: 600; }
+  table.list th { font-size: 11px; font-weight: 650; letter-spacing: .05em; color: var(--faint); text-transform: uppercase; border-bottom: 1px solid var(--line-strong); }
+  table.list tr:hover td { background: var(--sub); }
+  dialog { border-radius: 16px; box-shadow: 0 30px 80px -20px rgba(10,16,30,.45); }
+  dialog::backdrop { background: rgba(14,18,24,.45); backdrop-filter: blur(3px); }
+  .toast { border-radius: 12px; box-shadow: 0 12px 30px -10px rgba(10,16,30,.4); font-weight: 500; }
+  .welcome .card { transition: transform .15s, box-shadow .15s, border-color .15s; }
+  .welcome .card:hover { transform: translateY(-2px); }
+
+
+  header h1, header h1 *, .wf-bar > *, .wf-bar b, .wf-bar .chip, .seg button, #termBtn, nav button { white-space: nowrap; }
+  .wf-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  @media (max-width: 1100px) { header h1 .tag { display: none; } }
+  @media (max-width: 900px) { header h1 { font-size: 0; gap: 0; } header h1 .logo { font-size: 14px; } }
+
+  header { flex-wrap: nowrap; min-width: 0; }
+  #leaderBox, #modeBox { flex-wrap: nowrap; white-space: nowrap; }
+  #leaderBox select { max-width: 130px; }
+  nav { overflow-y: auto; scrollbar-width: none; }
+  nav button { padding: 7px 0 5px; }
+  .crew { gap: 6px; padding-top: 10px; }
+  .lamp { width: 32px; height: 32px; font-size: 10.5px; }
+  .lamp.busy::after { background: var(--accent); animation: lampBusy 1.4s ease-in-out infinite; }
+  @keyframes lampBusy { 0%, 100% { box-shadow: 0 0 0 0 var(--accent-ring); } 50% { box-shadow: 0 0 0 5px transparent, 0 0 10px var(--accent); } }
+
+  header { flex-wrap: nowrap; min-width: 0; }
+  #leaderBox, #modeBox { flex-wrap: nowrap; white-space: nowrap; }
+  #leaderBox select { max-width: 130px; }
+  nav { overflow-y: auto; scrollbar-width: none; }
+  nav button { padding: 7px 0 5px; }
+  .crew { gap: 6px; padding-top: 10px; }
+  .lamp { width: 32px; height: 32px; font-size: 10.5px; }
+  .lamp.busy::after { background: var(--accent); animation: lampBusy 1.4s ease-in-out infinite; }
+  @keyframes lampBusy { 0%, 100% { box-shadow: 0 0 0 0 var(--accent-ring); } 50% { box-shadow: 0 0 0 5px transparent, 0 0 10px var(--accent); } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="5.5" r="2.3" fill="#fff"/><circle cx="5.5" cy="17.5" r="2"/><circle cx="12" cy="18.5" r="2"/><circle cx="18.5" cy="17.5" r="2"/><path d="M12 8v8.3M10.6 7.4L6.6 15.7M13.4 7.4l4 8.3"/></svg></span>Agent 统筹面板<span class="tag">DISPATCH</span></h1>
+  <select id="projectSel" title="切换 / 新建 / 打开项目" style="max-width:220px"></select>
+  <span class="grow"></span>
+  <span id="modeBox" class="row small" title="手动：每步你确认；规则自动：面板按依赖派发、Leader 逐个评审；Leader 统筹：Leader 看全局、自己决定下一步谁做什么"><span class="seg" id="modeSeg"><button data-m="manual">手动</button><button data-m="auto">规则自动</button><button data-m="leader">Leader 统筹</button></span></span>
+  <button id="termBtn" title="网页终端：实时查看 agent 的命令行输出"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M7 9.5l3 2.5-3 2.5M12.5 15H17"/></svg>终端<span id="termCount"></span></button>
+  <span id="leaderBox" class="row small">Leader <select id="leader"></select><button id="leaderSkills" title="leader 默认带上的技能">🧩 技能</button></span>
+</header>
+<nav id="nav">
+  <button data-p="workflow"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.2"/><circle cx="19" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M7.2 6h9.6M6.2 7.9l4.6 8.2M17.8 7.9l-4.6 8.2"/></svg></span>工作流</button>
+  <button data-p="leader"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 15.4 7.2 17.9l.9-5.4L4.2 8.7l5.4-.8z"/></svg></span>Leader</button>
+  <button data-p="board"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="5" height="16" rx="1.5"/><rect x="9.5" y="4" width="5" height="11" rx="1.5"/><rect x="15.5" y="4" width="5" height="7" rx="1.5"/></svg></span>看板</button>
+  <button data-p="skills"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3.5h6v4a2 2 0 1 1 0 4v4.5H9v-3.2a2 2 0 1 0-4 0V16H3.5V9.5H7a2 2 0 1 0 0-4H3.5"/><path d="M15 11.5h5.5V20H9v-4"/></svg></span>技能库</button>
+  <button data-p="runs"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M4 12h16M4 18h12"/><circle cx="18" cy="6" r="2"/></svg></span>运行记录</button>
+  <button data-p="settings"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span>设置</button>
+  <div class="crew" id="crew" title="团队指示灯：亮起呼吸 = 正在干活，绿点 = 空闲，灰 = 停用 / 未安装，虚线框 = Leader"></div>
+</nav>
+<main id="main"></main>
+
+<dialog id="dlg"><div class="dlg-head"><strong id="dlgTitle"></strong><span class="tabs" id="dlgTabs"></span><span class="grow"></span><button id="dlgClose">关闭</button></div><div class="dlg-body" id="dlgBody"></div></dialog>
+<div class="toast" id="toast"></div>
+<div class="term" id="term">
+  <div class="term-tabs" id="termTabs"></div>
+  <div class="term-body" id="termBody"><div class="term-empty" id="termEmpty">现在没有运行中的任务。点卡片上的“实时日志”或运行记录里的“日志”，会在这里打开。</div></div>
+  <div class="term-foot" id="termFoot"></div>
+</div>
+
+<script>
+// ================= 基础 =================
+const COLS = [['backlog', '待办'], ['ready-for-dev', '可开发'], ['in-progress', '进行中'], ['review', '待审核'], ['done', '完成']];
+const KIND = { plan: 'Leader 分配', implement: '执行', review: 'Leader 评审', stage: '阶段', node: '节点', nodereview: 'Leader 自动评审', tick: 'Leader 唤醒', task: '临时任务' };
+const RUN_ST = { queued: '排队', running: '运行中', finished: '完成', failed: '失败', cancelled: '已取消' };
+const NODE_ST = { idle: ['未运行', ''], running: ['运行中', 'run'], waiting: ['待确认', 'warn'], done: ['完成', 'ok'], failed: ['失败', 'bad'] };
+const TYPES = { start: ['开始', '▶'], agent: ['Agent', '✦'], dev: ['开发看板', '▦'], human: ['人工确认', '✋'], end: ['结束', '■'] };
+const PRESETS = { '': '无（自定义指令）', prd: 'BMAD · PRD', architecture: 'BMAD · 架构', epics: 'BMAD · 拆分 Story' };
+let S = null, W = null, SKILLS = null, page = localStorage.getItem('page') || 'workflow', sel = null, selEdge = null, logRun = null;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const jsq = s => esc(String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+const color = id => `var(--${id}, var(--muted))`;
+const agentName = id => (S && S.agents.find(a => a.id === id) || {}).name || id || '未分配';
+const shortKey = k => k ? k.split('-').slice(0, 2).join('.') : '—';
+const fmtDur = ms => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? `${s} 秒` : s < 3600 ? `${Math.floor(s / 60)} 分 ${s % 60} 秒` : `${Math.floor(s / 3600)} 时 ${Math.floor(s % 3600 / 60)} 分`; };
+function toast(msg, kind = 'bad') { const t = $('toast'); t.textContent = msg; t.style.background = kind === 'ok' ? 'var(--ok)' : 'var(--bad)'; t.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => t.style.display = 'none', 5000); }
+async function api(p, body) {
+  const r = await fetch(p, body !== undefined ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
+  const j = await r.json();
+  if (!r.ok) { toast(j.error || '请求失败'); throw new Error(j.error); }
+  return j;
+}
+const q = o => '?' + new URLSearchParams(o).toString();
+function md(src) {
+  const inline = s => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  const lines = src.replace(/\r/g, '').split('\n'); let out = '', i = 0;
+  while (i < lines.length) {
+    const l = lines[i]; let m;
+    if (/^```/.test(l)) { const b = []; i++; while (i < lines.length && !/^```/.test(lines[i])) b.push(lines[i++]); i++; out += `<pre><code>${esc(b.join('\n'))}</code></pre>`; continue; }
+    if (/^---+\s*$/.test(l) && i === 0) { i++; while (i < lines.length && !/^---+\s*$/.test(lines[i])) i++; i++; continue; }
+    if ((m = l.match(/^(#{1,6})\s+(.*)/))) { out += `<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`; i++; continue; }
+    if (/^\s*\|/.test(l)) { const rows = []; while (i < lines.length && /^\s*\|/.test(lines[i])) rows.push(lines[i++]); const cells = r => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+      out += '<table>' + rows.filter(r => !/^\s*\|[\s:|-]+\|\s*$/.test(r)).map((r, k) => `<tr>${cells(r).map(c => k ? `<td>${inline(c)}</td>` : `<th>${inline(c)}</th>`).join('')}</tr>`).join('') + '</table>'; continue; }
+    if (/^\s*([-*]|\d+\.)\s+/.test(l)) { const ord = /^\s*\d+\./.test(l), b = []; while (i < lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[i])) b.push(lines[i++].replace(/^\s*([-*]|\d+\.)\s+/, ''));
+      out += `<${ord ? 'ol' : 'ul'}>${b.map(x => `<li>${inline(x)}</li>`).join('')}</${ord ? 'ol' : 'ul'}>`; continue; }
+    if (/^>\s?/.test(l)) { const b = []; while (i < lines.length && /^>\s?/.test(lines[i])) b.push(lines[i++].replace(/^>\s?/, '')); out += `<blockquote>${inline(b.join(' '))}</blockquote>`; continue; }
+    if (!l.trim()) { i++; continue; }
+    const b = []; while (i < lines.length && lines[i].trim() && !/^(#|```|\s*\||\s*([-*]|\d+\.)\s|>)/.test(lines[i])) b.push(lines[i++]);
+    if (!b.length) b.push(lines[i++]);
+    out += `<p>${inline(b.join(' '))}</p>`;
+  }
+  return `<div class="md">${out}</div>`;
+}
+function tick() {
+  for (const el of document.querySelectorAll('[data-since]')) el.textContent = fmtDur(Date.now() - Date.parse(el.dataset.since));
+  for (const el of document.querySelectorAll('[data-ago]')) { const ms = Date.now() - Date.parse(el.dataset.ago); if (!el.dataset.ago || isNaN(ms)) { el.textContent = ''; continue; } el.textContent = ms < 15000 ? '● 正在输出' : `最后输出 ${fmtDur(ms)}前`; el.style.color = ms > 180000 ? 'var(--warn)' : ''; }
+}
+setInterval(tick, 1000);
+function agentOptions(selId, onlyAvail = true) { return S.agents.map(a => `<option value="${a.id}" ${a.id === selId ? 'selected' : ''} ${onlyAvail && !a.available ? 'disabled' : ''}>${esc(a.name)}</option>`).join(''); }
+
+// ================= 加载与框架 =================
+async function load() {
+  S = await api('/api/state');
+  if (S.project) W = await api('/api/workflow').catch(() => null); else W = null;
+  renderTop(); renderPage();
+}
+async function refresh() { // 不打断编辑的刷新
+  S = await api('/api/state');
+  if (S.project) { const w = await api('/api/workflow'); W = { ...w, graph: graphDirty && W ? W.graph : w.graph }; }
+  renderTop();
+  if (page === 'workflow' && W && wfView === 'flow') { loadTimeline().then(() => { renderFlow(); renderWfBar(); }); }
+  else if (page === 'workflow' && W) { drawNodes(); drawEdges(); renderRunBox(); renderWfBar(); loadTimeline().then(() => { drawNodes(); renderWfBar(); }); }
+  else if (page === 'leader' && document.activeElement && ['leaderAns', 'leaderNote'].includes(document.activeElement.id)) return; // 正在给 Leader 写字，不打断
+  else if (page !== 'settings' && page !== 'skills') renderPage();
+}
+function renderTop() {
+  const opts = (S.recent || []).map(p => `<option value="${esc(p)}" title="${esc(p)}" ${p === S.project ? 'selected' : ''}>📁 ${esc(p.split(/[\\/]/).pop())}</option>`).join('');
+  $('projectSel').innerHTML = (S.project ? '' : '<option>（未打开项目）</option>') + opts + '<option disabled>──────</option><option value="__new">＋ 新建项目…</option><option value="__open">📂 打开已有项目…</option>';
+  $('leaderBox').style.display = S.project ? '' : 'none';
+  $('modeBox').style.display = S.project ? '' : 'none';
+  for (const b of $('modeSeg').children) b.classList.toggle('on', b.dataset.m === (S.mode || 'manual'));
+  if (S.project) {
+    $('leader').innerHTML = '<option value="">— 选择 —</option>' + S.agents.map(a => `<option value="${a.id}" ${a.available ? '' : 'disabled'} ${S.leader === a.id ? 'selected' : ''}>${esc(a.name)}${a.available ? '' : '（不可用）'}</option>`).join('');
+    $('leaderSkills').innerHTML = `${SKILL_ICON}<span>${(S.leaderSkills || []).length || '技能'}</span>`;
+  }
+  for (const b of $('nav').children) b.classList.toggle('on', b.dataset.p === page);
+  renderCrew();
+}
+const SKILL_ICON = document.querySelector('nav [data-p="skills"] svg').outerHTML;
+const CREW_ABBR = { claude: 'CL', codex: 'CX', gemini: 'GM', grok: 'GK', deepseek: 'DS' };
+// 团队指示灯：每个 agent 一盏灯，干活时呼吸发光
+function renderCrew() {
+  const el = $('crew'); if (!el || !S) return;
+  el.innerHTML = '<span class="lbl">CREW</span>' + S.agents.map(a => {
+    const runs = (S.runs || []).filter(r => r.agent === a.id && r.status === 'running' && r.kind !== 'tick');
+    const off = !a.available;
+    const st = off ? (a.installed ? '已停用' : '未安装') : runs.length ? `干活中 ×${runs.length}` : '空闲';
+    const cls = [off ? 'off' : runs.length ? 'busy' : 'idle', S.leader === a.id ? 'leader' : ''].join(' ');
+    const tip = `${a.name}${S.leader === a.id ? '（Leader）' : ''}
+模型：${a.effectiveModel || '默认'}
+状态：${st}`;
+    return `<span class="lamp ${cls}" style="--c:var(--${a.id}, var(--accent))" title="${esc(tip)}">${CREW_ABBR[a.id] || esc(a.id.slice(0, 2).toUpperCase())}</span>`;
+  }).join('');
+}
+function renderPage() {
+  const m = $('main');
+  if (!S.project) { m.innerHTML = welcome(); return; }
+  if (!S.bmadInstalled) { m.innerHTML = `<div class="page"><div class="card">这个目录还没装 BMAD。<button class="primary" onclick="setupDialog('${jsq(S.project)}')">安装 BMAD</button></div></div>`; return; }
+  if (page === 'workflow') return renderWorkflow();
+  if (page === 'board') m.innerHTML = `<div class="page">${devView()}</div>`;
+  if (page === 'leader') m.innerHTML = `<div class="page">${leaderView()}</div>`;
+  if (page === 'runs') m.innerHTML = `<div class="page">${runsView()}</div>`;
+  if (page === 'skills') return renderSkills();
+  hydrate();
+}
+const enter = () => { const pg = document.querySelector('#main .page'); if (pg) { pg.classList.remove('enter'); void pg.offsetWidth; pg.classList.add('enter'); } };
+$('nav').onclick = e => { const b = e.target.closest('button'); if (!b) return; if (b.dataset.p === 'settings') return openSettings(); page = b.dataset.p; localStorage.setItem('page', page); renderTop(); renderPage(); enter(); };
+function welcome() {
+  return `<div class="welcome">
+    <div class="card" onclick="newProjectDialog()"><h2>新建项目</h2><p class="muted">起个名字，自动装好 BMAD（五家工具）和嵌入式/通用模板，然后从一句需求开始。</p></div>
+    <div class="card" onclick="openProjectDialog()"><h2>打开已有项目</h2><p class="muted">选一个文件夹。没装 BMAD 的会帮你装上，已有的 PRD / 架构 / epics 会自动识别。</p></div></div>`;
+}
+
+// ================= 工作流画布 =================
+let view = { x: 40, y: 40, k: 1 }, graphDirty = false, saveTimer = null, drag = null;
+// Story 流程（时间线）数据：/api/timeline；面板还没加载新接口时为 'unavailable'
+let wfView = localStorage.getItem('wfView') || 'canvas', TL = null, tlAt = 0, tlBusy = null, tlOnlyRework = false;
+const seenChips = new Set();
+async function loadTimeline(force) {
+  if (!S || !S.project) return TL;
+  if (!force && Date.now() - tlAt < 3000) return tlBusy || TL;
+  tlAt = Date.now();
+  tlBusy = fetch('/api/timeline').then(r => r.ok ? r.json() : 'unavailable').catch(() => 'unavailable').then(x => { TL = x; tlBusy = null; return x; });
+  return tlBusy;
+}
+const tlList = () => Array.isArray(TL) ? TL : [];
+const tlReworks = () => tlList().reduce((a, s) => a + (s.reworks || 0), 0);
+window.setWfView = v => { wfView = v; localStorage.setItem('wfView', v); renderWorkflow(); };
+const nodeById = id => W.graph.nodes.find(n => n.id === id);
+const nst = id => (W.states && W.states[id]) || { status: 'idle' };
+function renderWorkflow() {
+  if (wfView === 'flow') {
+    $('main').innerHTML = `<div class="wf"><div class="wf-bar" id="wfBar"></div><div class="flow" id="flow"><div class="muted small">加载 Story 流程…</div></div></div>`;
+    renderWfBar();
+    loadTimeline(true).then(() => { renderFlow(); renderWfBar(); });
+    return;
+  }
+  loadTimeline().then(() => { drawNodes(); renderWfBar(); if (sel && nodeById(sel) && nodeById(sel).type === 'dev') renderSide(); });
+  let saved = null; try { saved = JSON.parse(localStorage.getItem('view:' + S.project)); } catch {}
+  if (saved) view = saved; else setTimeout(() => fitView(), 30);
+  $('main').innerHTML = `<div class="wf">
+    <div class="wf-bar" id="wfBar"></div>
+    <div class="canvas" id="canvas"><div class="world" id="world"><svg class="edges" id="edges"></svg><div id="nodes"></div></div>
+      <div class="zoom"><button onclick="zoomBy(1.2)">＋</button><button onclick="zoomBy(1/1.2)">－</button><button onclick="fitView()">适应</button></div></div>
+    <div id="side"></div></div>`;
+  renderWfBar(); applyView(); drawNodes(); drawEdges(); renderSide(); bindCanvas();
+}
+function renderWfBar() {
+  if (!$('wfBar')) return;
+  const total = W.graph.nodes.length, done = W.graph.nodes.filter(n => nst(n.id).status === 'done').length;
+  const waiting = W.graph.nodes.filter(n => nst(n.id).status === 'waiting').length;
+  const rw = tlReworks();
+  const seg = `<span class="seg"><button class="${wfView === 'canvas' ? 'on' : ''}" onclick="setWfView('canvas')">画布</button><button class="${wfView === 'flow' ? 'on' : ''}" onclick="setWfView('flow')" title="每个 Story 的实现、验收、打回、返工过程">Story 流程${rw ? `<span class="badge-r">↺${rw}</span>` : ''}</button></span>`;
+  $('wfBar').innerHTML = `${seg}<b>${esc(W.graph.name || '工作流')}</b><span class="chip ${W.running ? 'run' : ''}">${W.running ? '<span class="pulse">● 运行中</span>' : '未运行'}</span>
+    <span class="small muted">${done}/${total} 完成${waiting ? ` · <b style="color:var(--warn)">${waiting} 个待你确认</b>` : ''}</span>${S.mode === 'leader' ? '<span class="chip run">🧠 Leader 统筹</span>' : S.mode === 'auto' ? `<span class="chip run" title="按依赖派发、Leader 逐个评审">🤖 规则自动 · 最多打回 ${S.maxRounds} 轮</span>` : '<span class="chip">✋ 手动模式</span>'}<span class="grow"></span>
+    ${wfView === 'flow' ? '' : `<button onclick="addNodeMenu(event)">＋ 添加节点</button>
+    <select onchange="applyTemplate(this.value); this.value=''"><option value="">模板…</option>${W.templates.map(t => `<option value="${esc(t.file)}" title="${esc(t.description)}">${esc(t.name)}</option>`).join('')}</select>`}
+    ${W.running ? '<button onclick="api(\'/api/workflow/stop\',{}).then(refresh)">停止</button>' : '<button class="primary" onclick="runWorkflow()">▶ 运行</button>'}`;
+}
+window.runWorkflow = async () => { await saveGraphNow(); if (!S.leader && W.graph.nodes.some(n => n.type === 'agent' && (!n.config || !n.config.agent || n.config.agent === 'leader'))) return toast('先在右上角选 leader'); await api('/api/workflow/run', {}); refresh(); };
+window.applyTemplate = async file => { if (!file) return; if (!confirm('用模板替换当前工作流？已完成的产出文档不会删除。')) return; W = { ...W, ...(await api('/api/workflow/template', { file })) }; sel = null; renderWorkflow(); };
+function applyView() { const w = $('world'); if (w) w.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.k})`; localStorage.setItem('view:' + S.project, JSON.stringify(view)); }
+window.zoomBy = f => { const c = $('canvas').getBoundingClientRect(); zoomAt(c.width / 2, c.height / 2, f); };
+function zoomAt(cx, cy, f) { const k = Math.min(2, Math.max(.3, view.k * f)); view.x = cx - (cx - view.x) * k / view.k; view.y = cy - (cy - view.y) * k / view.k; view.k = k; applyView(); }
+window.fitView = () => {
+  const ns = W.graph.nodes; if (!ns.length) return;
+  const c = $('canvas').getBoundingClientRect(), minX = Math.min(...ns.map(n => n.x)), minY = Math.min(...ns.map(n => n.y)), maxX = Math.max(...ns.map(n => n.x + 230)), maxY = Math.max(...ns.map(n => n.y + 120));
+  const k = Math.min(1.2, Math.max(.3, Math.min((c.width - (sel ? 460 : 60)) / (maxX - minX), (c.height - 60) / (maxY - minY))));
+  view = { k, x: 30 - minX * k, y: (c.height - (maxY - minY) * k) / 2 - minY * k }; applyView();
+};
+// 一个事件 → 一个 chip
+function evChip(e, s, reworkNo) {
+  const dur = e.t && e.end ? fmtDur(Date.parse(e.end) - Date.parse(e.t)) : '';
+  const running = ['running', 'queued'].includes(e.status);
+  const who = e.agent ? agentName(e.agent) : '';
+  let t = '', sub = '', cls = '', tip = e.note || '';
+  if (e.type === 'impl') { t = reworkNo ? `↺ 返工 #${reworkNo}` : '🛠 实现'; sub = [who, running ? (e.status === 'queued' ? '排队' : '进行中') : dur, e.blocked ? '阻塞' : '', e.status === 'failed' ? '失败' : ''].filter(Boolean).join(' · '); cls = e.status === 'failed' ? 'bad' : e.blocked ? 'warn' : ''; }
+  else if (e.type === 'qa') { t = '🔍 交叉验收'; sub = [who, e.total != null ? `${e.pass}/${e.total} 条通过` : (running ? '进行中' : dur)].filter(Boolean).join(' · '); cls = e.total != null && e.pass < e.total ? 'warn' : e.status === 'failed' ? 'bad' : ''; }
+  else if (e.type === 'task') { t = '🧩 临时任务'; sub = [who, running ? '进行中' : dur].filter(Boolean).join(' · '); tip = (e.title || '') + (e.note ? '\n' + e.note : ''); }
+  else if (e.type === 'review') { t = '⚖ 评审'; sub = [who, e.verdict === 'approve' ? '建议通过' : e.verdict === 'changes' ? '建议修改' : running ? '进行中' : ''].filter(Boolean).join(' · '); cls = e.verdict === 'changes' ? 'warn' : ''; }
+  else if (e.type === 'reject') { t = '✗ 打回'; sub = (e.note || '').replace(/\s+/g, ' ').slice(0, 26) || 'Leader 打回'; cls = 'bad'; }
+  else if (e.type === 'accept') { t = '✓ 验收通过'; sub = e.evidence ? `证据 ${e.evidence} 条` : 'Leader'; cls = 'ok'; }
+  else if (e.type === 'denied') { t = '⛔ 被面板拦下'; sub = (e.note || '').slice(0, 26); cls = 'warn'; }
+  if (running) cls += ' run';
+  const k = (e.run || e.t) + e.type, fresh = !seenChips.has(k); seenChips.add(k);
+  return `<span class="ev ${cls} ${fresh ? 'new' : ''}" style="--c:${e.agent ? color(e.agent) : 'var(--line)'}" ${e.run ? `data-run="${e.run}" onclick="openLog('${e.run}')"` : ''} title="${esc(tip)}"><span class="t">${esc(t)}</span>${sub ? `<span class="s">${esc(sub)}</span>` : ''}</span>`;
+}
+function laneTrack(s) {
+  let rw = 0, prevReject = false, out = [];
+  s.events.forEach((e, i) => {
+    const isRework = e.type === 'impl' && prevReject;
+    if (isRework) rw++;
+    if (i) out.push(prevReject ? '<span class="arr loop" title="打回后返工">↺</span>' : '<span class="arr">→</span>');
+    out.push(evChip(e, s, isRework ? rw : 0));
+    if (e.type === 'reject' || (e.type === 'review' && e.verdict === 'changes')) prevReject = true;
+    else if (e.type === 'impl') prevReject = false;
+  });
+  if (s.status === 'done') out.push('<span class="arr">→</span><span class="ev ok" title="Story 已完成"><span class="t">🏁 完成</span></span>');
+  return out.join('') || '<span class="small muted">还没开始</span>';
+}
+function renderFlow() {
+  const box = $('flow'); if (!box) return;
+  if (TL === 'unavailable') { box.innerHTML = '<div class="card">Story 流程需要面板加载新接口，面板重启后可用（重启会在没有执行中任务时自动进行）。</div>'; return; }
+  const list = tlList(); if (!list.length) { box.innerHTML = '<div class="card">还没有 Story。拆分 Story 节点通过后这里会出现每个 Story 的流程。</div>'; return; }
+  const shown = tlOnlyRework ? list.filter(s => s.reworks) : list;
+  const ST = Object.fromEntries(COLS);
+  const runningN = list.filter(s => s.events.some(e => ['running', 'queued'].includes(e.status))).length;
+  const scroll = box.scrollTop;
+  box.innerHTML = `<div class="flow-head"><b>Story 流程</b><span class="small muted">${list.length} 个 Story · 完成 ${list.filter(s => s.status === 'done').length} · 返工 <b style="color:${tlReworks() ? 'var(--bad)' : 'inherit'}">${tlReworks()}</b> 次 · 在跑 ${runningN}</span><span class="grow"></span>
+      <label class="row small"><input type="checkbox" ${tlOnlyRework ? 'checked' : ''} onchange="tlOnlyRework=this.checked;renderFlow()"> 只看有返工的</label>
+      <span class="small muted">点 chip 看日志 · 🛠 实现 → 🔍 交叉验收 → ✗ 打回 ↺ 返工 → ✓ 验收</span></div>
+    ${shown.map(s => `<div class="lane ${s.reworks ? 'rw' : ''}">
+      <div class="lane-head"><span class="num">${s.epic}.${s.n}</span><span class="chip ${s.status === 'done' ? 'ok' : s.status === 'review' ? 'warn' : s.status === 'in-progress' ? 'run' : ''}">${ST[s.status] || s.status}</span>${s.reworks ? `<span class="chip bad">↺ 返工 ${s.reworks} 次</span>` : ''}${s.agent ? `<span class="owner" style="color:${color(s.agent)}">${esc(agentName(s.agent))}</span>` : ''}<span class="ttl" title="${esc(s.title)}">${esc(s.title)}</span></div>
+      <div class="lane-track">${laneTrack(s)}</div></div>`).join('') || '<div class="muted small">没有返工过的 Story 🎉</div>'}`;
+  box.scrollTop = scroll;
+  for (const t of box.querySelectorAll('.lane-track')) t.scrollLeft = t.scrollWidth; // 默认看最新的一步
+}
+function miniIcons(s) { return s.events.map(e => ({ impl: '🛠', qa: '🔍', task: '🧩', review: '⚖', reject: '✗', accept: '✓', denied: '⛔' }[e.type] || '·')).join('') + (s.status === 'done' ? '🏁' : ''); }
+function nodeAgentLabel(n) { const c = n.config || {}; return !c.agent || c.agent === 'leader' ? `Leader（${S.leader ? agentName(S.leader) : '未选'}）` : agentName(c.agent); }
+function nodeAgentId(n) { const c = n.config || {}; return !c.agent || c.agent === 'leader' ? S.leader : c.agent; }
+function drawNodes() {
+  const box = $('nodes'); if (!box) return;
+  box.innerHTML = W.graph.nodes.map(n => {
+    const s = nst(n.id), [stl, stc] = NODE_ST[s.status] || ['', ''], c = n.config || {}, [tl, ti] = TYPES[n.type] || ['?', '?'];
+    let body = '';
+    if (n.type === 'start') body = `<div class="ln">${esc((W.requirement || '').split('\n')[0] || '（还没写需求）')}</div>`;
+    if (n.type === 'agent') {
+      const aid = nodeAgentId(n);
+      body = `<div class="ln" style="color:${color(aid)}">● ${esc(nodeAgentLabel(n))}</div>
+        <div class="row" style="gap:4px">${c.preset ? `<span class="chip">${esc(PRESETS[c.preset])}</span>` : ''}${(c.skills || []).length ? `<span class="chip">🧩 ${c.skills.length}</span>` : ''}${c.approval ? '<span class="chip">需确认</span>' : ''}</div>`;
+    }
+    if (n.type === 'dev') { const rw = tlReworks(), rwN = tlList().filter(x => x.reworks).length; body = `<div class="ln">${s.progress ? `${s.progress.done}/${s.progress.total} 个 Story 完成` : '等拆分'}</div>${rw ? `<div class="ln" style="color:var(--bad)">↺ 返工 ${rw} 次 · 涉及 ${rwN} 个 Story</div>` : ''}`; }
+    if (n.type === 'human') body = `<div class="ln">${esc(c.note || '到这里暂停，等你确认')}</div>`;
+    if (s.status === 'running') body += `<div class="ln liveline" data-live="${s.runId || ''}">${esc(s.lastLine || '运行中…')}</div>${s.startedAt ? `<div class="ln">已运行 <span data-since="${s.startedAt}"></span></div>` : ''}`;
+    if (s.status === 'waiting') body += `<div class="ln" style="color:var(--warn)">${esc(s.note || '点开确认')}</div>`;
+    if (s.status === 'failed' && s.note) body += `<div class="ln" style="color:var(--bad)">${esc(s.note)}</div>`;
+    return `<div class="node s-${s.status} ${sel === n.id ? 'sel' : ''}" data-id="${n.id}" style="left:${n.x}px;top:${n.y}px;--tc:var(--t-${n.type})">
+      ${n.type !== 'start' ? '<span class="h in" data-in="' + n.id + '"></span>' : ''}${n.type !== 'end' ? '<span class="h out" data-out="' + n.id + '"></span>' : ''}
+      <div class="nh"><span class="ic">${ti}</span><span class="tt">${esc(n.title || tl)}</span>${s.stale ? '<span class="chip warn" title="上游重新确认过">上游已更新</span>' : ''}<span class="chip ${stc}">${s.status === 'running' ? '<span class="pulse">' + stl + '</span>' : stl}</span></div>
+      <div class="nb">${body}</div></div>`;
+  }).join('');
+  tick();
+}
+function portPos(id, side) { const n = nodeById(id); return n ? { x: n.x + (side === 'out' ? 230 : 0), y: n.y + 26 } : { x: 0, y: 0 }; }
+const curve = (a, b) => { const dx = Math.max(40, Math.abs(b.x - a.x) / 2); return `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`; };
+function drawEdges(temp) {
+  const svg = $('edges'); if (!svg) return;
+  svg.innerHTML = W.graph.edges.map((e, i) => {
+    const d = curve(portPos(e.from, 'out'), portPos(e.to, 'in')), live = nst(e.to).status === 'running' && nst(e.from).status === 'done';
+    return `<path class="e ${selEdge === i ? 'sel' : ''} ${live ? 'live' : ''}" d="${d}"/><path class="hit" data-edge="${i}" d="${d}"/>`;
+  }).join('') + (temp ? `<path class="e sel" d="${curve(temp.a, temp.b)}"/>` : '');
+}
+function toWorld(ev) { const r = $('canvas').getBoundingClientRect(); return { x: (ev.clientX - r.left - view.x) / view.k, y: (ev.clientY - r.top - view.y) / view.k }; }
+function bindCanvas() {
+  const cv = $('canvas');
+  cv.addEventListener('wheel', e => { e.preventDefault(); const r = cv.getBoundingClientRect(); zoomAt(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.1 : 1 / 1.1); }, { passive: false });
+  cv.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    const out = e.target.closest('[data-out]'), nodeEl = e.target.closest('.node'), edge = e.target.closest('[data-edge]');
+    if (out) { drag = { mode: 'link', from: out.dataset.out }; e.stopPropagation(); return; }
+    if (edge) { selEdge = +edge.dataset.edge; sel = null; drawEdges(); drawNodes(); renderSide(); return; }
+    if (nodeEl) { const n = nodeById(nodeEl.dataset.id), p = toWorld(e); drag = { mode: 'node', id: n.id, dx: p.x - n.x, dy: p.y - n.y, moved: false }; return; }
+    drag = { mode: 'pan', sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y, moved: false }; cv.classList.add('panning');
+  });
+  window.onpointermove = e => {
+    if (!drag || !$('canvas')) return;
+    if (drag.mode === 'pan') { view.x = drag.vx + e.clientX - drag.sx; view.y = drag.vy + e.clientY - drag.sy; drag.moved = true; applyView(); }
+    if (drag.mode === 'node') { const n = nodeById(drag.id), p = toWorld(e); n.x = Math.round((p.x - drag.dx) / 10) * 10; n.y = Math.round((p.y - drag.dy) / 10) * 10; drag.moved = true;
+      const el = document.querySelector(`.node[data-id="${n.id}"]`); if (el) { el.style.left = n.x + 'px'; el.style.top = n.y + 'px'; } drawEdges(); }
+    if (drag.mode === 'link') drawEdges({ a: portPos(drag.from, 'out'), b: toWorld(e) });
+  };
+  window.onpointerup = e => {
+    if (!drag || !$('canvas')) { drag = null; return; }
+    const d = drag; drag = null; $('canvas').classList.remove('panning');
+    if (d.mode === 'link') {
+      const inEl = document.elementFromPoint(e.clientX, e.clientY)?.closest('.node');
+      const to = inEl && inEl.dataset.id;
+      if (to && to !== d.from && nodeById(to).type !== 'start' && !W.graph.edges.some(x => x.from === d.from && x.to === to)) {
+        if (createsCycle(d.from, to)) toast('不能连成环');
+        else { W.graph.edges.push({ from: d.from, to }); saveGraph(); }
+      }
+      drawEdges();
+    }
+    if (d.mode === 'node') { if (d.moved) saveGraph(); else { sel = d.id; selEdge = null; drawNodes(); drawEdges(); renderSide(); } }
+    if (d.mode === 'pan' && !d.moved && (sel || selEdge !== null)) { sel = null; selEdge = null; drawNodes(); drawEdges(); renderSide(); }
+  };
+  window.onkeydown = e => {
+    if (page !== 'workflow' || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || $('dlg').open) return;
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (selEdge !== null) { W.graph.edges.splice(selEdge, 1); selEdge = null; saveGraph(); drawEdges(); }
+      else if (sel) deleteNode(sel);
+    }
+  };
+}
+function createsCycle(from, to) { const st = [to], seen = new Set(); while (st.length) { const x = st.pop(); if (x === from) return true; if (seen.has(x)) continue; seen.add(x); for (const e of W.graph.edges) if (e.from === x) st.push(e.to); } return false; }
+function saveGraph() { graphDirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(saveGraphNow, 500); }
+async function saveGraphNow() { clearTimeout(saveTimer); if (!graphDirty) return; graphDirty = false; await api('/api/workflow/save', { graph: W.graph }); }
+window.addNodeMenu = ev => {
+  closeMenu();
+  const items = [['agent', '', 'Agent 节点（自定义指令）'], ['agent', 'prd', 'BMAD · PRD'], ['agent', 'architecture', 'BMAD · 架构'], ['agent', 'epics', 'BMAD · 拆分 Story'], ['dev', '', '开发看板'], ['human', '', '人工确认'], ['end', '', '结束'], ['start', '', '开始（需求）']];
+  const m = document.createElement('div'); m.className = 'menu'; m.id = 'menu';
+  const r = ev.target.getBoundingClientRect(), mr = $('main').getBoundingClientRect();
+  m.style.left = (r.left - mr.left) + 'px'; m.style.top = (r.bottom - mr.top + 4) + 'px';
+  m.innerHTML = items.map(([t, p, label], i) => `<div data-i="${i}" style="--tc:var(--t-${t})"><span class="ic">${TYPES[t][1]}</span>${label}</div>`).join('');
+  m.onclick = e => { const it = e.target.closest('[data-i]'); if (!it) return; const [t, p, label] = items[+it.dataset.i]; addNode(t, p, label); closeMenu(); };
+  $('main').appendChild(m); setTimeout(() => document.addEventListener('click', closeMenu, { once: true }), 0);
+};
+function closeMenu() { const m = $('menu'); if (m) m.remove(); }
+function addNode(type, preset, label) {
+  const c = $('canvas').getBoundingClientRect();
+  const id = type + '-' + Math.random().toString(36).slice(2, 7);
+  const n = { id, type, title: preset ? label.replace('BMAD · ', '') : TYPES[type][0], x: Math.round(((c.width / 2 - view.x) / view.k - 115) / 10) * 10, y: Math.round(((c.height / 2 - view.y) / view.k - 40) / 10) * 10 };
+  if (type === 'agent') n.config = { agent: 'leader', preset: preset || '', skills: [], approval: !!preset, prompt: '' };
+  if (type === 'dev') n.config = { autoPlan: true };
+  if (type === 'human') n.config = { note: '' };
+  W.graph.nodes.push(n); sel = id; selEdge = null; saveGraph(); drawNodes(); drawEdges(); renderSide();
+}
+function deleteNode(id) {
+  if (!confirm('删除这个节点？')) return;
+  W.graph.nodes = W.graph.nodes.filter(n => n.id !== id); W.graph.edges = W.graph.edges.filter(e => e.from !== id && e.to !== id);
+  sel = null; saveGraph(); drawNodes(); drawEdges(); renderSide();
+}
+window.deleteNode = deleteNode;
+
+// ---- 右侧节点面板 ----
+function renderSide() {
+  const box = $('side'); if (!box) return;
+  const n = sel && nodeById(sel);
+  if (!n) { box.innerHTML = ''; return; }
+  const c = n.config || {}, [tl, ti] = TYPES[n.type];
+  let form = `<label class="field"><span>标题</span><input value="${esc(n.title || '')}" oninput="setNodeField('title', this.value)"></label>`;
+  if (n.type === 'start') form += `<label class="field"><span>需求（用自己的话写：做什么、给谁用、平台、关键约束）</span><textarea id="reqText" rows="10">${esc(W.requirement || '')}</textarea></label>
+    <div class="row"><span class="grow"></span><button class="primary" onclick="saveRequirement()">保存需求</button></div>`;
+  if (n.type === 'agent') form += `
+    <label class="field"><span>执行者</span><select onchange="setCfg('agent', this.value)"><option value="leader" ${!c.agent || c.agent === 'leader' ? 'selected' : ''}>Leader（当前：${esc(S.leader ? agentName(S.leader) : '未选')}）</option>${agentOptions(c.agent === 'leader' ? '' : c.agent)}</select></label>
+    <label class="field"><span>BMAD 预设</span><select onchange="setCfg('preset', this.value)">${Object.entries(PRESETS).map(([k, v]) => `<option value="${k}" ${(c.preset || '') === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+    ${S.mode === 'auto' ? '<div class="small muted">自动模式：执行者会从技能库里自己挑相关技能；这里选的会额外强制带上。</div>' : ''}
+    <div class="field"><span>技能（运行前自动装进项目，五家都能读）${!c.agent || c.agent === 'leader' ? ` · 另外会带上 Leader 默认技能 ${(S.leaderSkills || []).length} 个` : ''}</span>
+      <div class="skills-chips" id="nodeSkills">${skillChips(c.skills || [])}</div><div><button onclick="pickSkillsFor('node')">🧩 选择技能</button></div></div>
+    <label class="field"><span>${c.preset ? '额外要求（追加到 BMAD 预设任务后面）' : '指令'}</span><textarea rows="6" oninput="setCfg('prompt', this.value)" placeholder="${c.preset ? '例：PRD 控制在两页以内；重点写清掉电保存' : '这个节点要做什么、产出什么'}">${esc(c.prompt || '')}</textarea></label>
+    ${c.preset ? '' : `<label class="field"><span>产出文档（可选）</span><input value="${esc(c.outputDoc || '')}" placeholder="_bmad-output/planning-artifacts/xxx.md" oninput="setCfg('outputDoc', this.value)"></label>`}
+    <label class="row small"><input type="checkbox" ${c.approval ? 'checked' : ''} onchange="setCfg('approval', this.checked)"> ${S.mode === 'auto' ? '跑完后由 Leader 自动评审（手动模式下等你确认）' : '跑完后等我确认，再往下走'}</label>`;
+  if (n.type === 'dev') form += `<label class="row small"><input type="checkbox" ${c.autoPlan !== false ? 'checked' : ''} onchange="setCfg('autoPlan', this.checked)"> 进入时让 Leader 自动给出分配方案</label>
+    <div class="small muted">开发阶段在“看板”页操作：派发、评审、通过/打回。全部 Story 完成后，这个节点自动完成。</div><div class="row"><button onclick="goPage('board')">打开看板</button><button class="primary" onclick="setWfView('flow')">查看 Story 流程</button></div>
+    ${tlList().length ? `<div class="field"><span>各 Story 流程（🛠 实现 🔍 交叉验收 ✗ 打回 ✓ 验收 🏁 完成）</span>${tlList().map(x => `<div class="mini"><span class="muted">${x.epic}.${x.n}</span><span class="ic2" title="${esc(x.title)}">${miniIcons(x) || '—'}</span>${x.reworks ? `<span class="chip bad">↺${x.reworks}</span>` : '<span></span>'}</div>`).join('')}</div>` : (TL === 'unavailable' ? '<div class="small muted">Story 流程在面板重启后可用</div>' : '')}`;
+  if (n.type === 'human') form += `<label class="field"><span>说明（到这里要你确认什么）</span><textarea rows="4" oninput="setCfg('note', this.value)">${esc(c.note || '')}</textarea></label>`;
+  box.innerHTML = `<div class="side"><div class="sh" style="--tc:var(--t-${n.type})"><span class="ic" style="width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:#fff;background:var(--tc)">${ti}</span>
+      <b class="grow">${esc(n.title || tl)}</b><button class="ghost bad" title="删除节点" onclick="deleteNode('${n.id}')">删除</button><button class="ghost" onclick="sel=null;drawNodes();renderSide()">✕</button></div>
+    <div class="sb"><div id="runBox"></div>${form}</div></div>`;
+  renderRunBox();
+}
+function skillChips(ids) { return ids.length ? ids.map(id => `<span class="chip" title="${esc(id)}">🧩 ${esc(id.split(':').pop())}</span>`).join('') : '<span class="small muted">没选技能</span>'; }
+window.goPage = p => { page = p; localStorage.setItem('page', p); renderTop(); renderPage(); enter(); };
+window.setNodeField = (k, v) => { const n = nodeById(sel); n[k] = v; saveGraph(); drawNodes(); drawEdges(); };
+window.setCfg = (k, v) => { const n = nodeById(sel); n.config = { ...(n.config || {}), [k]: v }; saveGraph(); drawNodes(); if (['agent', 'preset'].includes(k)) renderSide(); };
+window.saveRequirement = async () => { await api('/api/requirement', { text: $('reqText').value }); toast('需求已保存', 'ok'); W.requirement = $('reqText').value; refresh(); };
+function renderRunBox() {
+  const box = $('runBox'), n = sel && nodeById(sel); if (!box || !n) return;
+  const s = nst(n.id), [stl, stc] = NODE_ST[s.status] || ['', ''], res = s.result;
+  let h = `<div class="row"><b>状态</b><span class="chip ${stc}">${stl}</span>${s.derived ? '<span class="small muted">（已有产出，自动识别）</span>' : ''}${s.stale ? '<span class="chip warn">上游已更新</span>' : ''}<span class="grow"></span>
+    ${s.runId ? `<button class="link" onclick="openLog('${s.runId}')">日志</button>` : ''}</div>`;
+  if (s.status === 'running') h += `<div class="liveline" data-live="${s.runId || ''}">${esc(s.lastLine || '运行中…')}</div>${s.startedAt ? `<div class="small">已运行 <span data-since="${s.startedAt}"></span></div>` : ''}${s.runId ? `<div><button class="bad" onclick="cancelRun('${s.runId}')">取消</button></div>` : ''}`;
+  if (s.note && s.status !== 'running') h += `<div class="small" style="color:${s.status === 'failed' ? 'var(--bad)' : 'var(--warn)'}">${esc(s.note)}</div>`;
+  if (n.type === 'dev' && s.progress) h += `<div class="small">${s.progress.done}/${s.progress.total} 个 Story 完成</div>`;
+  if (res) h += `<div class="small"><b>${esc(agentName(s.agent || nodeAgentId(n)))} 的说明：</b>${esc(res.summary || '')}</div>
+    ${res.open_questions && res.open_questions.length ? `<div class="small"><b style="color:var(--warn)">开放问题（需要你拍板）</b><ol style="margin:4px 0;padding-left:18px">${res.open_questions.map(x => `<li>${esc(x)}</li>`).join('')}</ol></div>` : ''}`;
+  if (s.doc) h += `<div class="small">产出：<button class="link" onclick="openDoc('${jsq(s.doc)}')">${esc(s.doc)}</button></div>`;
+  if (s.status === 'waiting' && n.type === 'agent') h += `<textarea id="nodeFb" rows="3" placeholder="修改意见：回答开放问题、指出要改的地方…"></textarea>
+    <div class="row"><button onclick="rerunNode(true)">按意见修改</button><span class="grow"></span><button class="primary" onclick="approveNode()">通过，继续</button></div>`;
+  else if (s.status === 'waiting') h += `<div class="row"><span class="grow"></span><button class="primary" onclick="approveNode()">${n.type === 'start' ? '需求已填好，继续' : '确认，继续'}</button></div>`;
+  if (n.type === 'agent' && s.status !== 'running' && s.status !== 'waiting') h += `<div class="row">${s.status === 'done' && s.doc ? '<textarea id="nodeFb" rows="2" class="grow" placeholder="（可选）修改意见"></textarea>' : ''}</div>
+    <div class="row"><button onclick="rerunNode(${s.status === 'done' && s.doc ? 'true' : 'false'})">${s.status === 'idle' ? '只运行这个节点' : '重新运行'}</button>${s.status !== 'idle' ? '<button class="ghost small" onclick="resetNode()">重置状态</button>' : ''}</div>`;
+  box.innerHTML = `<div class="runbox">${h}</div>`; tick();
+}
+window.rerunNode = async withFb => {
+  const fb = withFb && $('nodeFb') ? $('nodeFb').value.trim() : '';
+  const n = nodeById(sel), ps = W.graph.edges.filter(e => e.to === n.id).map(e => e.from).filter(id => nst(id).status !== 'done');
+  if (ps.length && !confirm(`上游还没完成：${ps.map(id => nodeById(id).title).join('、')}\n仍然运行？`)) return;
+  await saveGraphNow(); await api('/api/node/run', { id: sel, feedback: fb || null }); refresh();
+};
+window.approveNode = async () => { await api('/api/node/approve', { id: sel }); toast('已确认', 'ok'); refresh(); };
+window.resetNode = async () => { await api('/api/node/reset', { id: sel }); refresh(); };
+
+// ================= 技能 =================
+async function loadSkills(force) { if (!SKILLS || force) SKILLS = await api('/api/skills'); return SKILLS; }
+const SRC_ORDER = ['panel', 'project', 'user-claude', 'user-agents', 'user-codex', 'plugin'];
+const SRC_NAME = { project: '当前项目', panel: '精选库', 'user-claude': '~/.claude', 'user-agents': '~/.agents', 'user-codex': '~/.codex', plugin: 'Claude 插件' };
+let skFilter = { q: '', src: 'panel', cat: '' };
+async function renderSkills() {
+  const list = await loadSkills();
+  const counts = {}; for (const s of list) counts[s.source] = (counts[s.source] || 0) + 1;
+  const f = list.filter(s => (!skFilter.src || s.source === skFilter.src) && (!skFilter.cat || s.category === skFilter.cat) && (!skFilter.q || (s.name + ' ' + (s.note || '') + ' ' + (s.description || '')).toLowerCase().includes(skFilter.q.toLowerCase())));
+  const cats = [...new Set(list.filter(s => s.source === 'panel').map(s => s.category))];
+  $('main').innerHTML = `<div class="page">
+    <div class="row"><h2 style="margin:0">技能库</h2><span class="muted small">${list.length} 个技能 · 节点和 Leader 选中的技能会在运行前装进项目的 .claude/skills 与 .agents/skills</span><span class="grow"></span>
+      <input id="skQ" placeholder="搜索名称或描述" value="${esc(skFilter.q)}" style="width:240px"><button class="primary" onclick="newSkillDialog()">＋ 新建技能</button><button onclick="loadSkills(true).then(renderSkills)">刷新</button></div>
+    <div class="tabs">${SRC_ORDER.filter(k => counts[k]).map(k => `<button class="${skFilter.src === k ? 'on' : ''}" data-src="${k}">${SRC_NAME[k]} ${counts[k]}</button>`).join('')}<button class="${!skFilter.src ? 'on' : ''}" data-src="">全部来源 ${list.length}</button></div>
+    ${skFilter.src === 'panel' ? `<div class="tabs"><button class="${!skFilter.cat ? 'on' : ''}" data-cat="">全部分类</button>${cats.map(c => `<button class="${skFilter.cat === c ? 'on' : ''}" data-cat="${esc(c)}">${esc(c)} ${list.filter(s => s.source === 'panel' && s.category === c).length}</button>`).join('')}</div>` : ''}
+    <div class="sk-grid">${f.map(s => `<div class="card sk"><div class="row"><span class="nm">${esc(s.name)}</span><span class="grow"></span><span class="chip">${esc(s.sourceLabel)}</span></div>
+      ${s.note ? `<div style="font-size:13px">${esc(s.note)}</div>` : ''}<div class="ds">${esc(s.description || '（没有描述）')}</div>
+      <div class="row small"><button class="link" onclick="viewSkill('${jsq(s.id)}')">查看</button>
+        ${s.source !== 'project' ? `<button class="link" onclick="installSkill('${jsq(s.id)}')">装进当前项目</button>` : ''}
+        ${s.source !== 'panel' ? `<button class="link" onclick="importSkill('${jsq(s.id)}')">收藏到面板技能库</button>` : ''}
+        <span class="grow"></span><button class="link" onclick="addLeaderSkill('${jsq(s.id)}')">设为 Leader 技能</button></div></div>`).join('') || '<div class="muted">没有匹配的技能</div>'}</div></div>`;
+  $('skQ').oninput = e => { skFilter.q = e.target.value; clearTimeout(renderSkills.t); renderSkills.t = setTimeout(() => { renderSkills().then(() => { $('skQ').focus(); $('skQ').setSelectionRange(99, 99); }); }, 250); };
+  for (const b of document.querySelectorAll('.tabs [data-src]')) b.onclick = () => { skFilter.src = b.dataset.src; skFilter.cat = ''; renderSkills(); };
+  for (const b of document.querySelectorAll('.tabs [data-cat]')) b.onclick = () => { skFilter.cat = b.dataset.cat; renderSkills(); };
+}
+window.viewSkill = async id => {
+  const d = await api('/api/skills/content' + q({ id }));
+  const editable = d.source === 'panel';
+  dialog(`${d.name} · ${d.sourceLabel}`, `<div class="small muted" style="margin-bottom:8px">${esc(d.path || d.dir)} · ${d.files.length} 个文件：${d.files.map(esc).join('、')}</div>
+    ${editable ? `<textarea id="skEdit" rows="24" style="font:12px ui-monospace,Consolas,monospace">${esc(d.content)}</textarea><div class="row" style="margin-top:8px"><span class="grow"></span><button class="primary" onclick="saveSkill('${jsq(id)}')">保存</button></div>` : md(d.content)}`);
+};
+window.saveSkill = async id => { await api('/api/skills/save', { id, content: $('skEdit').value }); toast('已保存', 'ok'); SKILLS = null; };
+window.installSkill = async id => { const r = await api('/api/skills/install', { id }); toast(`已装进项目：${r.folder}`, 'ok'); SKILLS = null; if (page === 'skills') renderSkills(); };
+window.importSkill = async id => { await api('/api/skills/import', { id }); toast('已收藏到面板技能库', 'ok'); SKILLS = null; if (page === 'skills') renderSkills(); };
+window.addLeaderSkill = async id => { const ids = [...new Set([...(S.leaderSkills || []), id])]; S = await api('/api/leader', { skills: ids }); renderTop(); toast(`Leader 技能 ${ids.length} 个`, 'ok'); };
+window.newSkillDialog = () => {
+  dialog('新建技能（存到面板技能库）', `<div class="form"><label>名称（小写字母、数字、短横线）<input id="nsName" placeholder="例：stm32-hal-review"></label>
+    <label>描述（agent 靠它判断什么时候用这个技能）<input id="nsDesc" placeholder="例：评审 STM32 HAL/LL 驱动代码时使用：检查中断、DMA、时钟配置"></label>
+    <label>内容（SKILL.md 正文：步骤、检查清单、注意事项）<textarea id="nsBody" rows="14" placeholder="# 步骤&#10;1. …"></textarea></label>
+    <div class="row"><span class="grow"></span><button class="primary" onclick="createSkill()">创建</button></div></div>`, true);
+};
+window.createSkill = async () => { const r = await api('/api/skills/create', { name: $('nsName').value, description: $('nsDesc').value, body: $('nsBody').value }); $('dlg').close(); toast(`已创建 ${r.id}`, 'ok'); SKILLS = null; if (page === 'skills') renderSkills(); };
+// 选技能弹窗（节点 / Leader 共用）
+async function skillPicker(title, current, onOk) {
+  const list = await loadSkills(); let chosen = new Set(current), fq = '', fsrc = '';
+  const draw = () => {
+    const f = list.filter(s => (!fsrc || s.source === fsrc) && (!fq || (s.name + ' ' + (s.note || '') + ' ' + (s.description || '')).toLowerCase().includes(fq.toLowerCase()))).sort((a, b) => (a.source === 'panel' ? 0 : 1) - (b.source === 'panel' ? 0 : 1));
+    $('pickList').innerHTML = f.map(s => `<label><input type="checkbox" data-id="${esc(s.id)}" ${chosen.has(s.id) ? 'checked' : ''}><div><b>${esc(s.name)}</b> <span class="chip">${esc(s.sourceLabel)}</span><div class="small muted">${esc(s.note || (s.description || '').slice(0, 160))}</div></div></label>`).join('') || '<div class="muted" style="padding:10px">没有匹配</div>';
+    $('pickChosen').innerHTML = chosen.size ? [...chosen].map(id => `<span class="chip">🧩 ${esc(id.split(':').pop())}</span>`).join('') : '<span class="small muted">还没选</span>';
+  };
+  dialog(title, `<div class="form"><div class="row"><input id="pickQ" class="grow" placeholder="搜索"><select id="pickSrc"><option value="">全部来源</option>${SRC_ORDER.map(k => `<option value="${k}">${SRC_NAME[k]}</option>`).join('')}</select></div>
+    <div class="skills-chips" id="pickChosen"></div><div class="pick-list" id="pickList"></div>
+    <div class="row"><span class="small muted">非项目内的技能会在运行前自动复制进项目</span><span class="grow"></span><button onclick="$('dlg').close()">取消</button><button class="primary" id="pickOk">确定</button></div></div>`, true);
+  $('pickQ').oninput = e => { fq = e.target.value; draw(); }; $('pickSrc').onchange = e => { fsrc = e.target.value; draw(); };
+  $('pickList').onchange = e => { const id = e.target.dataset.id; if (!id) return; e.target.checked ? chosen.add(id) : chosen.delete(id); draw(); };
+  $('pickOk').onclick = () => { $('dlg').close(); onOk([...chosen]); };
+  draw(); setTimeout(() => $('pickQ').focus(), 50);
+}
+window.pickSkillsFor = () => { const n = nodeById(sel); skillPicker(`给「${n.title}」选技能`, (n.config || {}).skills || [], ids => { setCfg('skills', ids); renderSide(); }); };
+$('leaderSkills').onclick = () => skillPicker('Leader 默认技能（leader 跑的每个任务都会带上）', S.leaderSkills || [], async ids => { S = await api('/api/leader', { skills: ids }); renderTop(); toast(`Leader 技能 ${ids.length} 个`, 'ok'); });
+
+// ================= 看板（开发阶段） =================
+function devView() {
+  if (!S.hasEpics) return `<div class="card">还没有 Story。先在工作流里跑完“拆分 Story”节点。</div>`;
+  const planRun = S.runs.find(r => r.kind === 'plan' && ['queued', 'running'].includes(r.status));
+  const total = S.stories.length, done = S.stories.filter(s => s.status === 'done').length;
+  const agentsRow = `<div class="row">${S.agents.filter(a => a.installed).map(a => {
+    const busy = S.runs.filter(r => r.agent === a.id && r.status === 'running' && r.kind !== 'tick').length;
+    return `<span class="agent-chip" title="${esc(a.strengths)}"><span class="dot" style="background:${!a.enabled ? 'var(--line)' : busy ? 'var(--accent)' : 'var(--ok)'}"></span><b style="color:${color(a.id)}">${esc(a.name)}</b>${S.leader === a.id ? ' · Leader' : ''}${a.effectiveModel ? ' <span class="muted">' + esc(a.effectiveModel) + '</span>' : ''}${!a.enabled ? ' · 停用' : busy ? ' · <span class="pulse">干活中</span>' : ''}</span>`; }).join('')}</div>`;
+  const head = S.mode === 'manual' ? `<div class="card"><div class="row"><b>分配</b>
+      <button class="primary" ${!S.leader || planRun ? 'disabled' : ''} onclick="api('/api/plan',{}).then(load)">让 Leader 给出方案</button>
+      <button ${S.plan ? '' : 'disabled'} onclick="api('/api/plan/apply',{}).then(x=>{S=x;renderPage()})">全部采纳</button><span class="grow"></span>
+      <span class="small muted">并行</span><select onchange="api('/api/settings',{maxParallel:+this.value}).then(x=>{S=x;renderPage()})">${[1, 2, 3].map(n => `<option ${S.maxParallel === n ? 'selected' : ''}>${n}</option>`).join('')}</select>
+      <button class="ghost small" title="epics.md 改过后重新同步" onclick="api('/api/sprint/refresh',{}).then(x=>{S=x;renderPage();toast('已同步','ok')})">同步</button></div>
+      ${planRun ? liveBlock(planRun) : ''}${S.plan ? `<div class="small muted clamp2" style="margin-top:6px" onclick="this.classList.toggle('open')">方案：${esc(S.plan.summary || '')}</div>` : ''}</div>`
+    : `<div class="row"><span class="chip run">${S.mode === 'leader' ? '🧠 Leader 统筹中' : '🤖 规则自动中'}</span><span class="small muted">${done}/${total} 完成 · 派发和验收由 Leader 负责</span><span class="grow"></span>${S.mode === 'leader' ? '<button class="ghost small" onclick="goPage(\'leader\')">看 Leader 在想什么 →</button>' : ''}</div>`;
+  return `${head}${agentsRow}
+  <div class="board">${COLS.map(([st, label]) => { const list = S.stories.filter(s => s.status === st);
+    return `<div class="col"><h3><span>${label}</span><span>${list.length}</span></h3>${list.map(storyCard).join('') || '<div class="muted small" style="padding:4px">—</div>'}</div>`; }).join('')}</div>`;
+}
+function liveBlock(r) {
+  return `<div class="box"><div class="row"><span class="pulse" style="color:${color(r.agent)}">● ${esc(agentName(r.agent))}</span>
+    <span>${r.status === 'queued' ? '排队中' : `已运行 <span data-since="${r.startedAt}"></span>`}</span><span class="grow"></span>
+    <button class="link" onclick="openTerm('${r.id}')">▣ 终端</button><button class="link" style="color:var(--bad)" onclick="cancelRun('${r.id}')">取消</button></div>
+    <div class="liveline" data-live="${r.id}">${esc(r.lastLine || '等待输出…')}</div>${r.status === 'running' ? `<div class="small muted" data-ago="${r.lastOutputAt || r.startedAt || ''}"></div>` : ''}</div>`;
+}
+const lastRun = (key, kind) => S.runs.find(r => r.storyKey === key && (!kind || r.kind === kind));
+const planFor = key => S.plan && (S.plan.assignments || []).find(a => a.key === key);
+const pendingDeps = key => { const p = planFor(key); return p && p.depends_on ? p.depends_on.filter(k => (S.stories.find(s => s.key === k) || {}).status !== 'done') : []; };
+function storyCard(s) {
+  const plan = planFor(s.key), impl = lastRun(s.key, 'implement'), rev = lastRun(s.key, 'review');
+  const act = S.runs.find(r => r.storyKey === s.key && ['queued', 'running'].includes(r.status));
+  const rel = S.runs.find(r => r.kind === 'task' && r.relatedStory === s.key && ['queued', 'running'].includes(r.status));
+  const manual = S.mode === 'manual';
+  let actions = '';
+  if (manual && ['backlog', 'ready-for-dev'].includes(s.status)) actions = `<button class="primary" ${!s.agent || act ? 'disabled' : ''} onclick="runStory('${s.key}')">派发</button>`;
+  if (manual && s.status === 'in-progress' && !act) actions = `<button onclick="setStatus('${s.key}','ready-for-dev')">退回</button>`;
+  if (s.status === 'review' && !act) actions = (manual ? `<button ${!S.leader ? 'disabled' : ''} onclick="api('/api/review',{key:'${s.key}'}).then(load)">Leader 评审</button>` : '') + `<button class="ok" onclick="setStatus('${s.key}','done')">通过</button><button class="bad" onclick="rejectDialog('${s.key}')">打回</button>`;
+  if (manual && s.status === 'done') actions = `<button class="ghost small" onclick="setStatus('${s.key}','ready-for-dev')">重开</button>`;
+  const tags = [s.needsHuman ? '<span class="chip warn">需人工</span>' : '', s.status !== 'done' && pendingDeps(s.key).length ? '<span class="chip">等依赖</span>' : '', impl && impl.status === 'failed' && !act ? '<span class="chip bad">上次失败</span>' : '', rev && rev.verdict && s.status === 'review' ? `<span class="chip ${rev.verdict === 'approve' ? 'ok' : 'warn'}">Leader：${rev.verdict === 'approve' ? '建议通过' : '建议修改'}</span>` : '', s.feedback ? '<span class="chip warn">被打回</span>' : ''].join('');
+  const owner = manual && !act && s.status !== 'done'
+    ? `<select style="width:auto;font-size:12px;padding:2px 4px" onchange="api('/api/assign',{key:'${s.key}',agent:this.value}).then(x=>{S=x;renderPage()})"><option value="">分配给…</option>${agentOptions(s.agent)}</select>`
+    : `<span class="owner" style="color:${s.agent ? color(s.agent) : 'var(--muted)'}">${esc(s.agent ? agentName(s.agent) : '未分配')}</span>`;
+  let details = '';
+  if (plan) details += `<div class="hint" style="margin-top:0;border:0;padding-top:0">Leader 建议 <b style="color:${color(plan.agent)}">${esc(agentName(plan.agent))}</b>${plan.depends_on && plan.depends_on.length ? ` · 依赖 ${plan.depends_on.map(shortKey).join(', ')}` : ''}：${esc(plan.reason || '')}</div>`;
+  if (impl && impl.hasResult && !act) details += `<div class="box" data-result="${impl.id}">加载结果…</div>`;
+  if (impl && !act && impl.changedFiles && impl.changedFiles.length) details += `<div class="box files"><b>改动 ${impl.changedFiles.length} 个文件</b>${impl.changedFiles.map(f => `<button class="link" onclick="openDiff('${impl.id}','${jsq(f)}')">${esc(f)}</button>`).join('')}</div>`;
+  if (s.feedback) details += `<div class="box" style="color:var(--warn)">打回意见：${esc(s.feedback)}</div>`;
+  const acc = (S.acceptance || {})[s.key];
+  if (acc && s.status === 'done') details += `<div class="box"><b style="color:var(--ok)">验收证据</b>（交叉验收：${esc(agentName(acc.qaAgent))}）<ul style="margin:4px 0;padding-left:16px">${acc.evidence.map(e => `<li>${e.pass ? '✓' : '✗'} ${esc(e.criterion || '')} <span class="muted">· ${esc(e.method || '')} · ${esc(e.detail || '')}</span></li>`).join('')}</ul></div>`;
+  if (impl && impl.status === 'failed' && !act && impl.error) details += `<div class="box" style="color:var(--bad)">失败：${esc(impl.error)}</div>`;
+  if (impl) details += `<div class="small" style="margin-top:6px"><button class="link" onclick="openLog('${impl.id}')">执行日志</button>${rev ? ` · <button class="link" onclick="openLog('${rev.id}','结果')">评审详情</button>` : ''}</div>`;
+  return `<div class="card story ${act ? 'running' : ''}" style="--c:${s.agent ? color(s.agent) : 'var(--line)'}">
+    <div class="top"><span class="num">${s.epic}.${s.n}</span><span class="title grow" style="margin:0">${esc(s.title)}</span>${owner}</div>
+    ${tags ? `<div class="row" style="gap:4px;margin-top:6px">${tags}</div>` : ''}
+    ${act ? liveBlock(act) : ''}${rel ? `<div class="box">临时任务：${esc(rel.title || '')}</div>${liveBlock(rel)}` : ''}
+    ${details ? `<details class="more"><summary>详情</summary>${details}</details>` : ''}
+    ${actions ? `<div class="actions">${actions}</div>` : ''}</div>`;
+}
+window.runStory = key => { const d = pendingDeps(key); if (d.length && !confirm(`Leader 标注的依赖还没完成：\n${d.join('\n')}\n\n仍然派发？`)) return; api('/api/run', { key }).then(load); };
+window.setStatus = (key, status) => api('/api/status', { key, status }).then(x => { S = x; renderPage(); });
+window.cancelRun = id => api('/api/cancel', { runId: id }).then(refresh);
+document.addEventListener('toggle', e => { if (e.target.matches && e.target.matches('details.more') && e.target.open) hydrate(); }, true);
+async function hydrate() {
+  tick();
+  for (const el of document.querySelectorAll('details[open] [data-result], .page > [data-result]')) {
+    if (el.dataset.loaded) continue; el.dataset.loaded = 1;
+    try {
+      const { result: r, run } = await api('/api/log' + q({ id: el.dataset.result }));
+      el.innerHTML = r ? `<b>${esc(agentName(run.agent))}</b>：${esc(r.summary || '')}
+        ${r.tests ? `<br>测试 ${r.tests.passed ? '<span style="color:var(--ok)">通过</span>' : '<span style="color:var(--bad)">未通过</span>'}：<code>${esc(r.tests.command || '')}</code>` : ''}
+        ${r.manual_checks && r.manual_checks.length ? `<br><span style="color:var(--warn)">需人工：${r.manual_checks.map(esc).join('；')}</span>` : ''}
+        ${r.blocker ? `<br><span style="color:var(--bad)">阻塞：${esc(r.blocker)}</span>` : ''}` : '没有结果文件';
+    } catch { el.textContent = '结果读取失败'; }
+  }
+}
+
+// ================= Leader 控制台 =================
+function leaderView() {
+  const L = S.leaderBoard || {}, tick = S.runs.find(r => r.kind === 'tick' && ['queued', 'running'].includes(r.status));
+  const pr = L.progress;
+  const ACT = { dispatch: '派活', set_status: '验收', approve_node: '通过节点', rerun_node: '重做节点', ask_human: '提问', finish: '宣布完成' };
+  const actLine = a => `<li><b>${ACT[a.type] || a.type}</b> ${a.agent ? '→ <span style="color:' + color(a.agent) + '">' + esc(agentName(a.agent)) + '</span> ' : ''}${esc(a.story ? 'Story ' + shortKey(a.story) : a.node ? '节点 ' + a.node : a.title || '')}${a.status ? '：' + (a.status === 'done' ? '通过' : '打回') : ''}${a.feedback ? '<div class="small muted clamp2" onclick="this.classList.toggle(\'open\')">' + esc(a.feedback) + '</div>' : ''}${a.instructions ? '<div class="small muted clamp2" onclick="this.classList.toggle(\'open\')">' + esc(a.instructions) + '</div>' : ''}${a.question ? '<div class="small">' + esc(a.question) + '</div>' : ''}${a.evidence && a.evidence.length ? '<div class="small muted">证据 ' + a.evidence.length + ' 条：' + a.evidence.filter(e => e.pass).length + ' 条通过</div>' : ''}${a.outcome && a.outcome !== 'ok' ? ' <span style="color:var(--bad)">' + esc(a.outcome) + '</span>' : ''}</li>`;
+  return `
+  <div class="card"><div class="row"><h3 style="margin:0">🧠 Leader 统筹</h3>
+    <span class="chip ${S.mode === 'leader' ? 'run' : ''}">${S.mode === 'leader' ? '已开启' : '未开启（顶栏切到“Leader 统筹”）'}</span>
+    <span class="small muted">Leader：${esc(agentName(S.leader))}${(S.agents.find(x => x.id === S.leader) || {}).effectiveModel ? '（' + esc(S.agents.find(x => x.id === S.leader).effectiveModel) + '）' : ''} · 已唤醒 ${L.ticks || 0} 次${L.lastTickAt ? ' · 上次 ' + new Date(L.lastTickAt).toLocaleString() : ''}</span><span class="grow"></span>
+    ${tick ? `<span class="pulse">● 思考中 <span data-since="${tick.startedAt || tick.createdAt}"></span></span><button class="link" onclick="openLog('${tick.id}')">实时日志</button>` : (S.mode === 'leader' ? '<button onclick="api(\'/api/leader/tick\',{}).then(load)">立即唤醒 Leader</button>' : '')}</div>
+    ${tick ? `<div class="liveline" data-live="${tick.id}" style="margin-top:6px">${esc(tick.lastLine || '')}</div>` : ''}
+    ${L.error ? `<div class="box" style="color:var(--bad)">${esc(L.error)} <button onclick="api('/api/leader/resume',{}).then(load)">继续</button></div>` : ''}
+    ${L.finished ? `<div class="box" style="color:var(--ok)"><b>Leader 宣布完成</b>（${new Date(L.finished.at).toLocaleString()}）：${esc(L.finished.summary)} <button onclick="api('/api/leader/resume',{}).then(load)">继续做</button></div>` : ''}
+    ${L.ask && !L.ask.answered ? `<div class="box" style="border:1px solid var(--warn)"><b style="color:var(--warn)">Leader 在等你回答：</b>${esc(L.ask.q)}
+      <textarea id="leaderAns" rows="3" style="margin-top:6px"></textarea><div class="row" style="margin-top:6px"><span class="grow"></span><button class="primary" onclick="answerLeader()">回答</button></div></div>` : ''}
+  </div>
+  ${S.mode === 'leader' ? `<div class="card"><div class="row"><b>跟 Leader 说</b><span class="small muted">你是客户：提要求、改需求、表达偏好都写这里，Leader 下一轮会处理</span></div><div class="row" style="margin-top:8px"><textarea id="leaderNote" class="grow" rows="2" placeholder="例：公式栏字体大一点；先把 CSV 导入做稳，图表以后再说" style="flex:1"></textarea><button class="primary" onclick="$('leaderNote') ? noteLeader() : null">发送</button></div></div>` : ''}
+  <div class="card"><div class="row"><b>验收档位</b><span class="seg">${[['fast', '快速'], ['standard', '标准'], ['strict', '严格']].map(([k, l]) => `<button class="${S.acceptLevel === k ? 'on' : ''}" onclick="setAcceptLevel('${k}')">${l}</button>`).join('')}</span><span class="small muted">${({ fast: '实现者自测 + Leader 复跑测试就放行，不派交叉验收', standard: 'Leader 亲自验收、逐条给证据；拿不准才派交叉验收', strict: '每个 Story 都换人交叉验收，最稳但最慢' })[S.acceptLevel] || ''}</span></div></div>
+  <div class="grid2">
+    <div class="card"><div class="row"><b>全局笔记</b><span class="small muted">Leader 每轮自己更新：已完成、进行中、风险、下一步</span></div>
+      <div style="white-space:pre-wrap;margin-top:8px">${esc(L.notes || '（还没有，第一次唤醒后生成）')}</div>
+      ${pr ? `<div class="row" style="margin-top:10px">${pr.is_done ? '<span class="chip ok">需求已满足</span>' : '<span class="chip">未完成</span>'}${pr.making_progress === false ? '<span class="chip warn">没有进展</span>' : '<span class="chip ok">有进展</span>'}${pr.is_looping ? '<span class="chip bad">在兜圈子</span>' : ''}<span class="small muted">${esc(pr.reason || '')}</span></div>` : ''}</div>
+    <div class="card"><b>进度</b>
+      <div class="small" style="margin-top:8px">${S.stories.length ? COLS.map(([k, l]) => `${l} ${S.stories.filter(x => x.status === k).length}`).join(' · ') : '还没有 Story'}</div>
+      <div class="small muted" style="margin-top:6px">正在运行：${S.runs.filter(r => r.kind !== 'tick' && ['queued', 'running'].includes(r.status)).map(r => `${agentName(r.agent)} · ${KIND[r.kind] || r.kind} ${r.storyKey ? shortKey(r.storyKey) : r.nodeId || r.title || ''}`).join('；') || '无'}</div>
+      ${(L.answers || []).length ? `<details class="more small"><summary>你回答过的问题（${L.answers.length}）</summary><ul>${L.answers.map(a => '<li>' + esc(a.q) + '<br><span class="muted">→ ' + esc(a.a) + '</span></li>').join('')}</ul></details>` : ''}</div>
+  </div>
+  <div class="card"><b>决策记录</b>（最新在上）
+    ${(L.log || []).map(t => `<div class="box"><div class="row"><b>${new Date(t.at).toLocaleTimeString()}</b>${t.progress && t.progress.reason ? '<span class="small muted">' + esc(t.progress.reason) + '</span>' : ''}<span class="grow"></span><button class="link" onclick="openLog('${t.run}')">这轮的简报和输出</button></div>
+      ${t.actions.length ? '<ul style="margin:4px 0;padding-left:18px">' + t.actions.map(actLine).join('') + '</ul>' : '<div class="small muted">没有动作（等正在运行的任务）</div>'}</div>`).join('') || '<div class="small muted" style="margin-top:6px">还没有记录</div>'}</div>`;
+}
+window.setAcceptLevel = async v => { S = await api('/api/mode', { acceptLevel: v }); toast('验收档位：' + ({ fast: '快速', standard: '标准', strict: '严格' })[v], 'ok'); renderPage(); };
+window.noteLeader = async () => { const t = $('leaderNote').value.trim(); if (!t) return toast('先写内容'); S = await api('/api/leader/note', { text: t }); toast('已转给 Leader，它下一轮会看到', 'ok'); renderPage(); };
+window.answerLeader = async () => { const t = $('leaderAns').value.trim(); if (!t) return toast('先写回答'); S = await api('/api/leader/answer', { text: t }); renderPage(); };
+
+// ================= 运行记录 =================
+let showCancelled = false;
+window.toggleCancelled = () => { showCancelled = !showCancelled; renderPage(); };
+function runsView() {
+  const active = S.runs.filter(r => ['queued', 'running'].includes(r.status));
+  const label = r => r.nodeId ? `节点 ${esc((W && W.graph.nodes.find(n => n.id === r.nodeId) || {}).title || r.nodeId)}` : r.stage ? esc(r.stage) : r.storyKey ? 'Story ' + shortKey(r.storyKey) : '全部 Story';
+  return `<div class="card"><div class="row"><h3 style="margin:0">运行记录</h3><span class="small muted">${active.length ? `${active.filter(r => r.status === 'running').length} 运行中 · ${active.filter(r => r.status === 'queued').length} 排队` : '空闲'}</span><span class="grow"></span><button class="link" onclick="toggleCancelled()">${showCancelled ? '隐藏' : '显示'}已取消（${S.runs.filter(r => r.status === 'cancelled').length}）</button></div>
+    <table class="list"><thead><tr><th>开始</th><th>类型</th><th>对象</th><th>Agent</th><th>耗时</th><th>状态</th><th></th></tr></thead><tbody>
+    ${S.runs.filter(r => showCancelled || r.status !== 'cancelled').map(r => `<tr><td>${new Date(r.createdAt).toLocaleString()}</td><td>${KIND[r.kind] || r.kind}</td><td>${label(r)}</td>
+      <td style="color:${color(r.agent)}">${esc(agentName(r.agent))}</td><td>${r.startedAt ? (r.endedAt ? fmtDur(Date.parse(r.endedAt) - Date.parse(r.startedAt)) : `<span data-since="${r.startedAt}"></span>`) : '—'}</td>
+      <td class="st-${r.status}">${RUN_ST[r.status]}${r.verdict ? ' · ' + (r.verdict === 'approve' ? '建议通过' : '建议修改') : ''}${r.error ? ' · ' + esc(r.error) : ''}</td>
+      <td><button class="link" onclick="openLog('${r.id}')">日志</button>${['queued', 'running'].includes(r.status) ? ` <button class="link" style="color:var(--bad)" onclick="cancelRun('${r.id}')">取消</button>` : ''}</td></tr>`).join('')}
+    </tbody></table></div>
+    <div class="card small"><b>项目文档：</b>${S.docs.map(d => `<button class="link" style="margin-right:12px" onclick="openDoc('${jsq(d)}')">${esc(d)}</button>`).join('')}</div>`;
+}
+
+// ================= 弹窗 =================
+function dialog(title, html, narrow) { $('dlgTitle').textContent = title; $('dlgTabs').innerHTML = ''; $('dlgBody').innerHTML = html; $('dlg').classList.toggle('narrow', !!narrow); if (!$('dlg').open) $('dlg').showModal(); logRun = null; }
+$('dlgClose').onclick = () => $('dlg').close();
+$('dlg').addEventListener('close', () => { logRun = null; });
+// ================= 网页终端 =================
+const TERM = { open: false, max: false, tabs: [], active: null };
+const termShort = t => { const m = t.match(/-Command\s+(["'])([\s\S]*)\1\s+in\s+\S+\s*$/); let c = m ? m[2] : t.replace(/\s+in\s+[A-Za-z]:\\\S*\s*$/, ''); c = c.replace(/^"?[A-Za-z]:\\[^"]*?powershell\.exe"?\s*/i, '').replace(/\\"/g, '"'); return /^-Command\s/.test(c) ? c.replace(/^-Command\s+/, '') : c; };
+function termTabLabel(r) { const tgt = r.storyKey ? 'Story ' + shortKey(r.storyKey) : r.nodeId ? ((W && W.graph.nodes.find(n => n.id === r.nodeId) || {}).title || r.nodeId) : r.title || ''; return `${agentName(r.agent)} · ${KIND[r.kind] || r.kind}${tgt ? ' · ' + tgt : ''}`; }
+function termLine(tab, text, cls) {
+  const div = document.createElement('div'); div.className = 'tl ' + (cls || ''); div.textContent = text;
+  const body = $('termBody'), atEnd = body.scrollTop + body.clientHeight >= body.scrollHeight - 60;
+  tab.el.insertBefore(div, tab.cursor);
+  if (tab.el.childElementCount > 5000) for (let k = 0; k < 600; k++) tab.el.removeChild(tab.el.firstChild);
+  if (tab.id === TERM.active) { if (atEnd || tab.follow) body.scrollTop = body.scrollHeight; else showJump(); }
+}
+function termClassify(tab, raw) {
+  const t = raw.replace(/\s+$/, ''), s = t.trim();
+  if (!s) return;
+  if (tab.first) { tab.first = false; if (s.startsWith('$ ')) { tab.cmdline = s.slice(2); return termLine(tab, s, 'launch'); } }
+  if (/^-{4,}$|^={4,}$|^(OpenAI Codex|workdir|model|provider|approval|sandbox|reasoning|session id)/i.test(s)) return termLine(tab, t, 'dim');
+  if (s === 'codex') { tab.mode = 'say'; return termLine(tab, '💬 ' + agentName(tab.run.agent), 'hdr'); }
+  if (s === 'user') { tab.mode = 'user'; return termLine(tab, '📋 任务', 'hdr'); }
+  if (s === 'thinking') { tab.mode = 'think'; return termLine(tab, '🤔 思考', 'hdr'); }
+  if (s === 'exec') { tab.mode = 'exec'; tab.expectCmd = true; return; }
+  if (s === 'tokens used') { tab.mode = 'tail'; return termLine(tab, '— tokens used —', 'dim'); }
+  if (tab.expectCmd) { tab.expectCmd = false; return termLine(tab, termShort(s), 'cmd'); }
+  let m;
+  if ((m = s.match(/^succeeded in (\d+)ms/))) return termLine(tab, `✓ 成功 · ${m[1]}ms`, 'ok');
+  if ((m = s.match(/^exited (-?\d+) in (\d+)ms/))) return termLine(tab, `${m[1] === '0' ? '✓' : '✗'} 退出码 ${m[1]} · ${m[2]}ms`, m[1] === '0' ? 'ok' : 'err');
+  if (/^\[exit (\d+)\]/.test(s)) return termLine(tab, s, /\[exit 0\]/.test(s) ? 'ok' : 'err');
+  if (/^(diff --git|index [0-9a-f]|@@|\+\+\+|---\s)/.test(s)) return termLine(tab, t, 'dim');
+  if (tab.mode === 'exec' && /^\+/.test(t)) return termLine(tab, t, 'add');
+  if (tab.mode === 'exec' && /^-/.test(t)) return termLine(tab, t, 'del');
+  if (/^warning|WARN/i.test(s)) return termLine(tab, t, 'warn');
+  if (/(^|\s)(ERROR|Error:|not ok|FAIL|failed)\b/.test(s)) return termLine(tab, t, 'err');
+  if (tab.mode === 'say' || tab.mode === null) return termLine(tab, t, 'say');
+  if (tab.mode === 'user' || tab.mode === 'think') return termLine(tab, t, 'dim');
+  termLine(tab, t);
+}
+function termFeed(tab, text) {
+  tab.buf += text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r/g, '');
+  const lines = tab.buf.split('\n'); tab.buf = lines.pop();
+  for (const l of lines) termClassify(tab, l);
+  // Grok 这类不换行的叙述：句子说完就先显示出来
+  if (tab.buf.length > 0 && (tab.mode === null || tab.mode === 'say')) {
+    const parts = tab.buf.split(/(?<=[。！？!?])/);
+    if (parts.length > 1) { tab.buf = parts.pop(); for (const p of parts) if (p.trim()) termClassify(tab, p); }
+  }
+}
+async function openTerm(runId) {
+  const r = S.runs.find(x => x.id === runId);
+  if (!r) return toast('找不到这个运行');
+  let tab = TERM.tabs.find(t => t.id === runId);
+  if (!tab) {
+    const el = document.createElement('div'); el.className = 'tb';
+    const cursor = document.createElement('span'); cursor.className = 'cursor'; el.appendChild(cursor);
+    $('termBody').appendChild(el);
+    tab = { id: runId, run: r, el, cursor, buf: '', mode: null, expectCmd: false, first: true, cmdline: '', status: r.status, loaded: false, pending: [] };
+    TERM.tabs.push(tab);
+    const d = await api('/api/log' + q({ id: runId }));
+    termFeed(tab, d.log || ''); tab.loaded = true;
+    for (const p of tab.pending) termFeed(tab, p); tab.pending = [];
+    if (!['running', 'queued'].includes(r.status)) { termFeed(tab, '\n'); tab.cursor.remove(); }
+  }
+  TERM.active = runId; termShow(true); termRender();
+  $('termBody').scrollTop = $('termBody').scrollHeight;
+}
+window.openTerm = openTerm;
+function termShow(open) {
+  TERM.open = open; $('term').classList.toggle('open', open); document.body.classList.toggle('term-open', open);
+  if (open && !TERM.tabs.length) { for (const r of S.runs.filter(x => ['running', 'queued'].includes(x.status))) openTerm(r.id); }
+}
+function termRender() {
+  const running = S ? S.runs.filter(r => ['running', 'queued'].includes(r.status)).length : 0;
+  $('termCount').innerHTML = running ? `<span class="badge">${running}</span>` : '';
+  $('termEmpty').style.display = TERM.tabs.length ? 'none' : '';
+  $('termTabs').innerHTML = TERM.tabs.map(t => { const r = (S && S.runs.find(x => x.id === t.id)) || t.run;
+    const cls = ['running', 'queued'].includes(r.status) ? 'run' : r.status === 'finished' ? 'ok' : 'bad';
+    return `<div class="term-tab ${t.id === TERM.active ? 'on' : ''} ${t.flash ? 'flash' : ''}" data-id="${t.id}" style="--tc:${color(r.agent)}"><span class="st ${cls}"></span>${esc(termTabLabel(r))}<span class="x" data-close="${t.id}">✕</span></div>`; }).join('')
+    + `<div class="term-tools"><button title="跟随最新输出" onclick="termFollow()">${(TERM.tabs.find(t => t.id === TERM.active) || {}).follow ? '⏸ 暂停滚动' : '⤓ 跟随'}</button><button title="放大 / 还原" onclick="termMax()">${TERM.max ? '▭' : '▢'}</button><button title="收起" onclick="termShow(false)">▾</button></div>`;
+  for (const t of TERM.tabs) { t.el.classList.toggle('on', t.id === TERM.active); t.flash = false; }
+  const a = TERM.tabs.find(t => t.id === TERM.active), r = a && ((S && S.runs.find(x => x.id === a.id)) || a.run);
+  $('termFoot').innerHTML = a ? `<span style="color:${color(r.agent)}">●</span><span>${RUN_ST[r.status] || r.status}</span>${r.startedAt ? `<span>${r.endedAt ? '用时 ' + fmtDur(Date.parse(r.endedAt) - Date.parse(r.startedAt)) : '已运行 <span data-since="' + r.startedAt + '"></span>'}</span>` : ''}${['running'].includes(r.status) ? `<span data-ago="${r.lastOutputAt || r.startedAt || ''}"></span>` : ''}<span class="cmdline grow" title="${esc(a.cmdline)}">${esc(a.cmdline)}</span><button class="link" style="color:#58a6ff" onclick="openLog('${a.id}','任务')">任务书</button>` : '';
+  tick();
+}
+function showJump() { if ($('termJump')) return; const b = document.createElement('button'); b.className = 'jump'; b.id = 'termJump'; b.textContent = '↓ 有新输出'; b.onclick = () => { $('termBody').scrollTop = $('termBody').scrollHeight; b.remove(); }; $('termBody').appendChild(b); }
+window.termShow = termShow; window.termMax = () => { TERM.max = !TERM.max; $('term').classList.toggle('max', TERM.max); termRender(); };
+window.termFollow = () => { const a = TERM.tabs.find(t => t.id === TERM.active); if (a) { a.follow = !a.follow; if (a.follow) $('termBody').scrollTop = $('termBody').scrollHeight; } termRender(); };
+$('termBody').addEventListener('scroll', () => { const b = $('termBody'); if (b.scrollTop + b.clientHeight >= b.scrollHeight - 60 && $('termJump')) $('termJump').remove(); });
+$('termTabs').onclick = e => {
+  const c = e.target.closest('[data-close]'); if (c) { const id = c.dataset.close, t = TERM.tabs.find(x => x.id === id); if (t) t.el.remove(); TERM.tabs = TERM.tabs.filter(x => x.id !== id); if (TERM.active === id) TERM.active = (TERM.tabs[TERM.tabs.length - 1] || {}).id || null; termRender(); return; }
+  const tb = e.target.closest('.term-tab'); if (tb) { TERM.active = tb.dataset.id; termRender(); $('termBody').scrollTop = $('termBody').scrollHeight; }
+};
+$('termBtn').onclick = () => termShow(!TERM.open);
+$('term').querySelector('.term-tabs').ondblclick = () => termMax();
+function termSync() { // 状态刷新时：新开始的任务自动加标签，结束的标签闪一下
+  if (!S) return;
+  for (const t of TERM.tabs) { const r = S.runs.find(x => x.id === t.id); if (r && t.status !== r.status) { if (['running', 'queued'].includes(t.status) && !['running', 'queued'].includes(r.status)) { t.flash = true; t.cursor.remove(); termFeed(t, '\n'); } t.status = r.status; } }
+  if (TERM.open) for (const r of S.runs.filter(x => x.status === 'running')) if (!TERM.tabs.find(t => t.id === r.id)) openTerm(r.id).then(() => {});
+  termRender();
+}
+window.openLog = async (id, tab = '日志') => {
+  const rr = S && S.runs.find(x => x.id === id);
+  if (rr && tab === '日志' && ['running', 'queued'].includes(rr.status)) return openTerm(id);
+  const d = await api('/api/log' + q({ id }));
+  const fmtLog = t => t.split('\n').map(l => l.length > 200 ? l.replace(/([。！？])(?=\S)/g, '$1\n') : l).join('\n');
+  const tabs = { 日志: fmtLog(d.log || '（暂无输出）'), 任务: d.task, 结果: d.result ? JSON.stringify(d.result, null, 2) : '（还没有结果文件）' };
+  dialog(`${KIND[d.run.kind] || d.run.kind} · ${agentName(d.run.agent)}`, '<pre class="log" id="logPre"></pre>');
+  $('dlgTabs').innerHTML = Object.keys(tabs).map(t => `<button data-t="${t}">${t}</button>`).join('');
+  const show = t => { [...$('dlgTabs').children].forEach(b => b.classList.toggle('on', b.dataset.t === t)); $('logPre').textContent = tabs[t]; logRun = t === '日志' ? id : null; $('dlgBody').scrollTop = t === '日志' ? 1e9 : 0; };
+  $('dlgTabs').onclick = e => e.target.dataset.t && show(e.target.dataset.t);
+  show(tab);
+};
+window.openDoc = async p => { const d = await api('/api/doc' + q({ path: p })); dialog(p, /\.md$/i.test(p) ? md(d.text) : `<pre class="log">${esc(d.text)}</pre>`); };
+window.openDiff = async (id, file) => {
+  const d = await api('/api/diff' + q({ id, file }));
+  dialog(`${file}${d.isNew ? '（新文件）' : d.isDeleted ? '（已删除）' : ''}`, `<div class="diff">${d.diff.split('\n').map(l => `<div class="${l[0] === '+' ? 'a' : l[0] === '-' ? 'd' : l.startsWith('@@') ? 'h' : ''}">${esc(l)}</div>`).join('')}</div>`);
+};
+window.rejectDialog = key => {
+  dialog(`打回 Story ${shortKey(key)}`, `<div class="form"><label>打回意见（会带进下一轮执行的任务里）<textarea id="rejText" rows="6"></textarea></label>
+    <div class="row"><span class="grow"></span><button class="bad" onclick="doReject('${key}')">打回</button></div></div>`, true);
+  setTimeout(() => $('rejText').focus(), 50);
+};
+window.doReject = async key => { const fb = $('rejText').value.trim(); if (!fb) return toast('写一下打回原因'); S = await api('/api/status', { key, status: 'ready-for-dev', feedback: fb }); $('dlg').close(); renderPage(); };
+
+// ---- 项目 ----
+window.newProjectDialog = () => {
+  dialog('新建项目', `<div class="form">
+    <label>项目名<input id="npName" placeholder="例：thermostat-v2"></label>
+    <label>放在哪个文件夹<div class="row"><input id="npParent" class="grow" value="${esc(S.projectsRoot)}"><button onclick="pickFolder(p=>$('npParent').value=p)">浏览…</button></div></label>
+    <label>模板<select id="npTpl"><option value="embedded">嵌入式（带 embedded-standards 约束 + 嵌入式角色）</option><option value="generic">通用软件</option></select></label>
+    <div class="small muted">会自动：建目录 → 安装 BMAD（五家都能读）→ 套模板 → git init。大约 1 分钟。</div>
+    <div class="row"><span class="grow"></span><button class="primary" onclick="createProject()">创建</button></div>
+    <pre class="log" id="setupLog" style="max-height:260px;overflow:auto"></pre></div>`, true);
+  setTimeout(() => $('npName').focus(), 50);
+};
+window.createProject = async () => {
+  const job = await api('/api/project/create', { name: $('npName').value.trim(), parent: $('npParent').value.trim(), template: $('npTpl').value });
+  watchSetup(job.dir, () => { $('dlg').close(); page = 'workflow'; localStorage.setItem('page', page); sel = 'start'; load(); toast('项目已创建，先在“需求”节点里写需求', 'ok'); });
+};
+function watchSetup(dir, done) {
+  const t = setInterval(async () => {
+    const j = await api('/api/setup' + q({ dir }));
+    if ($('setupLog')) { $('setupLog').textContent = j.log || '安装中…'; $('setupLog').scrollTop = 1e9; }
+    if (j.status === 'done') { clearInterval(t); done(); }
+    if (j.status === 'failed') { clearInterval(t); toast(j.error || '安装失败'); }
+  }, 1500);
+}
+window.openProjectDialog = () => pickFolder(async p => {
+  const r = await api('/api/project/open', { project: p });
+  if (r.needsSetup) setupDialog(r.path); else { $('dlg').close(); sel = null; load(); }
+}, true);
+window.setupDialog = dir => {
+  dialog('安装 BMAD', `<div class="form"><div>${esc(dir)} 还没装 BMAD。装上后才能用工作流。已有文件不会被覆盖。</div>
+    <label>模板<select id="suTpl"><option value="embedded">嵌入式</option><option value="generic">通用软件</option></select></label>
+    <div class="row"><span class="grow"></span><button class="primary" onclick="doSetup('${jsq(dir)}')">安装</button></div>
+    <pre class="log" id="setupLog" style="max-height:260px;overflow:auto"></pre></div>`, true);
+};
+window.doSetup = async dir => { await api('/api/project/setup', { path: dir, template: $('suTpl').value }); watchSetup(dir, () => { $('dlg').close(); load(); toast('BMAD 已装好', 'ok'); }); };
+window.pickFolder = (cb, openMode) => {
+  let cur = openMode ? (S.project || S.projectsRoot) : $('npParent') ? $('npParent').value : '';
+  const prevBody = $('dlg').open ? $('dlgBody').innerHTML : null, prevTitle = $('dlgTitle').textContent;
+  const prevVals = {}; if (prevBody !== null) for (const el of $('dlgBody').querySelectorAll('input[id],select[id],textarea[id]')) prevVals[el.id] = el.value;
+  const draw = async p => {
+    const d = await api('/api/fs' + q({ path: p || '' })); cur = d.path;
+    dialog(openMode ? '打开项目文件夹' : '选择文件夹', `<div class="form"><div class="row"><input id="fsPath" class="grow" value="${esc(d.path)}"><button onclick="fsGo($('fsPath').value)">前往</button></div>
+      <div class="fs-list">${d.parent !== null ? `<div onclick="fsGo('${jsq(d.parent || '')}')">⬆ 上一级</div>` : ''}${d.dirs.map(x => `<div onclick="fsGo('${jsq(x)}')">📁 ${esc(x.split(/[\\/]/).filter(Boolean).pop() || x)}</div>`).join('') || '<div class="muted">（没有子文件夹）</div>'}</div>
+      <div class="row">${d.isBmad ? '<span class="chip ok">已装 BMAD</span>' : ''}<span class="grow"></span><button class="primary" ${d.path ? '' : 'disabled'} onclick="fsPick()">选这个文件夹</button></div></div>`, true);
+  };
+  window.fsGo = draw;
+  window.fsPick = () => {
+    if (prevBody !== null && !openMode) { dialog(prevTitle, prevBody, true); for (const [k, v] of Object.entries(prevVals)) if ($(k)) $(k).value = v; }
+    cb(cur);
+  };
+  draw(cur);
+};
+$('projectSel').onchange = e => {
+  const v = e.target.value;
+  if (v === '__new' || v === '__open') { renderTop(); return v === '__new' ? newProjectDialog() : openProjectDialog(); }
+  api('/api/project/open', { project: e.target.value }).then(r => { if (r.needsSetup) setupDialog(r.path); else { sel = null; SKILLS = null; load(); } });
+};
+$('modeSeg').onclick = async e => {
+  const m = e.target.dataset.m; if (!m || m === S.mode) return;
+  if (m === 'auto' && !S.leader) return toast('先选 leader');
+  S = await api('/api/mode', { mode: m }); toast(m === 'leader' ? '已切到 Leader 统筹：Leader 每次被唤醒都会看全局，自己决定下一步' : m === 'auto' ? `已切到规则自动：按依赖派发，Leader 逐个评审（最多打回 ${S.maxRounds} 轮）` : '已切到手动模式：每步等你确认', 'ok'); if (m === 'leader') goPage('leader'); else refresh();
+};
+$('leader').onchange = e => api('/api/leader', { agent: e.target.value }).then(x => { S = x; renderTop(); if (page === 'workflow') { drawNodes(); renderSide(); } });
+
+// ---- 设置 ----
+async function openSettings() {
+  const list = await api('/api/agents');
+  dialog('设置', `<div class="form">
+    <div class="grid2"><label>同时运行的任务数<select id="setPar" title="同时跑的任务数。Leader 会保证同时跑的任务不改同一批文件">${[1, 2, 3, 4, 5].map(n => `<option ${S.maxParallel === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+    <label>自动模式最多打回几轮<select id="setRounds" onchange="api('/api/mode',{maxRounds:+this.value}).then(x=>{S=x;toast('已保存','ok')})">${[1, 2, 3, 4, 5].map(n => `<option ${S.maxRounds === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
+    <label>新项目默认放在<div class="row"><input id="setRoot" class="grow" value="${esc(S.projectsRoot)}"><button onclick="saveGlobal()">保存</button></div></label></div>
+    ${list.map(settingsCard).join('')}</div>`);
+}
+window.openSettings = openSettings;
+function settingsCard(a) {
+  const t = a.test;
+  return `<div class="card settings-agent" style="--c:${color(a.id)}" id="set-${a.id}">
+    <div class="row"><b style="color:${color(a.id)}">${esc(a.name)}</b><span class="chip ${a.installed ? 'ok' : 'bad'}">${a.installed ? '已安装' : '未安装'}</span>
+      <label class="row small"><input type="checkbox" id="en-${a.id}" ${a.enabled ? 'checked' : ''}> 启用</label><span class="grow"></span>
+      <span class="small" id="test-${a.id}">${testLabel(t)}</span><button ${a.installed ? '' : 'disabled'} onclick="testAgent('${a.id}')">测连通</button></div>
+    <div class="small muted">${esc(a.path || a.cmd)}</div>
+    <div class="grid2" style="margin-top:8px">
+      <label>权限<select id="perm-${a.id}">${a.permOptions.map(o => `<option value="${o}" ${a.permission === o ? 'selected' : ''}>${o === 'max' ? '最高（无审批、无沙箱，测试电脑用）' : '标准（自动改文件，危险命令拦截）'}</option>`).join('')}</select></label>
+      <label>模型${a.canModel ? `<div class="row"><input id="model-${a.id}" class="grow" list="ml-${a.id}" value="${esc(a.model || '')}" placeholder="留空用默认">${a.baseUrl ? `<button onclick="loadModels('${a.id}')">拉取列表</button>` : ''}</div><datalist id="ml-${a.id}"></datalist>` : `<div class="small muted">${esc(a.modelNote || '在 agent 自己的配置里改')}</div>`}</label></div>
+    ${a.baseUrl ? `<div class="grid2" style="margin-top:8px"><label>中转站<div class="small">${esc(a.relay || '')}<br><code>${esc(a.baseUrl)}</code></div></label>
+      <label>Key（${esc(a.keyName)}：${esc(a.keyMasked || '未设置')}）<div class="row"><input id="key-${a.id}" class="grow" type="password" placeholder="粘贴新 key 替换" autocomplete="off"><button onclick="saveKey('${a.id}')">替换</button></div></label></div>` : ''}
+    <label style="margin-top:8px">特长（leader 分配时参考）<input id="str-${a.id}" value="${esc(a.strengths || '')}"></label>
+    <div class="row" style="margin-top:8px"><span class="grow"></span><button class="primary" onclick="saveAgent('${a.id}', ${a.canModel})">保存</button></div>
+    ${t && t.output && t.status !== 'ok' ? `<details><summary class="small">测连通输出</summary><pre class="log">${esc(t.output)}</pre></details>` : ''}</div>`;
+}
+const testLabel = t => !t ? '' : t.status === 'running' ? '<span class="pulse">测试中…</span>' : t.status === 'ok' ? `<span style="color:var(--ok)">✓ 通 · ${fmtDur(t.ms)}</span>` : `<span style="color:var(--bad)">✗ ${t.status === 'timeout' ? '超时' : '失败'}</span>`;
+window.saveGlobal = () => api('/api/settings', { maxParallel: +$('setPar').value, projectsRoot: $('setRoot').value.trim() }).then(x => { S = x; toast('已保存', 'ok'); });
+window.saveAgent = async (id, canModel) => {
+  const patch = { enabled: $('en-' + id).checked, permission: $('perm-' + id).value, strengths: $('str-' + id).value };
+  if (canModel) patch.model = $('model-' + id).value.trim();
+  await api('/api/agents/save', { id, patch }); toast('已保存', 'ok'); S = await api('/api/state'); renderTop();
+};
+window.saveKey = async id => { const v = $('key-' + id).value.trim(); if (!v) return toast('先粘贴 key'); await api('/api/agents/secret', { id, value: v }); toast('key 已替换', 'ok'); openSettings(); };
+window.testAgent = async id => { await api('/api/agents/test', { id }); $('test-' + id).innerHTML = testLabel({ status: 'running' }); };
+window.loadModels = async id => { const ms = await api('/api/agents/models' + q({ id })); $('ml-' + id).innerHTML = ms.map(m => `<option value="${esc(m)}">`).join(''); toast(`可用模型：${ms.join('、')}`, 'ok'); $('model-' + id).focus(); };
+
+// ================= 实时更新 =================
+const es = new EventSource('/api/events');
+let pending = null;
+es.addEventListener('state', () => { clearTimeout(pending); pending = setTimeout(() => refresh().then(termSync).catch(() => {}), 250); });
+es.addEventListener('log', e => {
+  const { runId, text, lastLine } = JSON.parse(e.data);
+  for (const el of document.querySelectorAll(`[data-live="${runId}"]`)) { el.textContent = lastLine || el.textContent; const ago = el.parentElement && el.parentElement.querySelector('[data-ago]'); if (ago && JSON.parse(e.data).lastOutputAt) ago.dataset.ago = JSON.parse(e.data).lastOutputAt; }
+  for (const t of TERM.tabs) if (t.id === runId) { if (t.loaded) termFeed(t, text); else t.pending.push(text); }
+  if ($('dlg').open && logRun === runId) { const pre = $('logPre'), b = $('dlgBody'), atEnd = b.scrollTop + b.clientHeight >= b.scrollHeight - 40; pre.textContent += text.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/([。！？])(?=\S)/g, '$1\n'); if (atEnd) b.scrollTop = 1e9; }
+});
+es.addEventListener('agenttest', e => { const t = JSON.parse(e.data); const el = $('test-' + t.id); if (el) el.innerHTML = testLabel(t); if (t.status !== 'running' && $('set-' + t.id)) openSettings(); });
+load().then(termRender);
+</script>
+</body>
+</html>

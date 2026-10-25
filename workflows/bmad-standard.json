@@ -1,0 +1,94 @@
+{
+  "name": "BMAD 标准流程",
+  "description": "需求 → PRD → 架构 → 拆分 Story → 开发看板（每个规划阶段都要你确认）",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "title": "需求",
+      "x": 40,
+      "y": 200
+    },
+    {
+      "id": "prd",
+      "type": "agent",
+      "title": "PRD",
+      "x": 300,
+      "y": 200,
+      "config": {
+        "agent": "leader",
+        "preset": "prd",
+        "skills": [],
+        "approval": true,
+        "prompt": ""
+      }
+    },
+    {
+      "id": "arch",
+      "type": "agent",
+      "title": "架构设计",
+      "x": 560,
+      "y": 200,
+      "config": {
+        "agent": "leader",
+        "preset": "architecture",
+        "skills": [],
+        "approval": true,
+        "prompt": ""
+      }
+    },
+    {
+      "id": "epics",
+      "type": "agent",
+      "title": "拆分 Story",
+      "x": 820,
+      "y": 200,
+      "config": {
+        "agent": "leader",
+        "preset": "epics",
+        "skills": [],
+        "approval": true,
+        "prompt": ""
+      }
+    },
+    {
+      "id": "dev",
+      "type": "dev",
+      "title": "开发看板",
+      "x": 1080,
+      "y": 200,
+      "config": {
+        "autoPlan": true
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "title": "完成",
+      "x": 1340,
+      "y": 200
+    }
+  ],
+  "edges": [
+    {
+      "from": "start",
+      "to": "prd"
+    },
+    {
+      "from": "prd",
+      "to": "arch"
+    },
+    {
+      "from": "arch",
+      "to": "epics"
+    },
+    {
+      "from": "epics",
+      "to": "dev"
+    },
+    {
+      "from": "dev",
+      "to": "end"
+    }
+  ]
+}

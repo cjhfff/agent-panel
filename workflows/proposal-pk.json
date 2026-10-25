@@ -1,0 +1,84 @@
+{
+  "name": "方案 PK（并行两家）",
+  "description": "同一个需求让两家 agent 各出一版设计方案，leader 汇总对比，你拍板",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "title": "需求",
+      "x": 40,
+      "y": 220
+    },
+    {
+      "id": "a",
+      "type": "agent",
+      "title": "方案 A",
+      "x": 320,
+      "y": 100,
+      "config": {
+        "agent": "claude",
+        "skills": [],
+        "approval": false,
+        "prompt": "针对需求给出一版技术方案（模块划分、关键接口、风险），写到 _bmad-output/planning-artifacts/proposals/proposal-a.md。",
+        "outputDoc": "_bmad-output/planning-artifacts/proposals/proposal-a.md"
+      }
+    },
+    {
+      "id": "b",
+      "type": "agent",
+      "title": "方案 B",
+      "x": 320,
+      "y": 340,
+      "config": {
+        "agent": "grok",
+        "skills": [],
+        "approval": false,
+        "prompt": "针对需求给出一版技术方案（模块划分、关键接口、风险），写到 _bmad-output/planning-artifacts/proposals/proposal-b.md。",
+        "outputDoc": "_bmad-output/planning-artifacts/proposals/proposal-b.md"
+      }
+    },
+    {
+      "id": "merge",
+      "type": "agent",
+      "title": "Leader 汇总对比",
+      "x": 620,
+      "y": 220,
+      "config": {
+        "agent": "leader",
+        "skills": [],
+        "approval": true,
+        "prompt": "读上游两份方案，按可行性、风险、工作量做对比表，给出推荐和理由，写到 _bmad-output/planning-artifacts/proposals/comparison.md。",
+        "outputDoc": "_bmad-output/planning-artifacts/proposals/comparison.md"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "title": "完成",
+      "x": 900,
+      "y": 220
+    }
+  ],
+  "edges": [
+    {
+      "from": "start",
+      "to": "a"
+    },
+    {
+      "from": "start",
+      "to": "b"
+    },
+    {
+      "from": "a",
+      "to": "merge"
+    },
+    {
+      "from": "b",
+      "to": "merge"
+    },
+    {
+      "from": "merge",
+      "to": "end"
+    }
+  ]
+}

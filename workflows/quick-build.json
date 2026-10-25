@@ -1,0 +1,64 @@
+{
+  "name": "快速实现 + 评审",
+  "description": "小需求不走完整规划：需求 → 一个 agent 直接实现 → leader 评审 → 你确认",
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "title": "需求",
+      "x": 40,
+      "y": 200
+    },
+    {
+      "id": "impl",
+      "type": "agent",
+      "title": "直接实现",
+      "x": 320,
+      "y": 200,
+      "config": {
+        "agent": "codex",
+        "skills": [
+          "project:bmad-build"
+        ],
+        "approval": false,
+        "prompt": "按需求直接实现。先读 AGENTS.md；先写测试再写实现；测试全部通过才算完成。最后在 summary 里写清改了哪些文件、怎么验证的。"
+      }
+    },
+    {
+      "id": "review",
+      "type": "agent",
+      "title": "Leader 评审",
+      "x": 600,
+      "y": 200,
+      "config": {
+        "agent": "leader",
+        "skills": [
+          "project:bmad-code-review"
+        ],
+        "approval": true,
+        "prompt": "只读评审上游实现：对照需求和 AGENTS.md 的规则逐条检查，运行测试命令确认。把问题按严重程度列在 open_questions 里，没有问题就写“建议通过”。不要改代码。"
+      }
+    },
+    {
+      "id": "end",
+      "type": "end",
+      "title": "完成",
+      "x": 880,
+      "y": 200
+    }
+  ],
+  "edges": [
+    {
+      "from": "start",
+      "to": "impl"
+    },
+    {
+      "from": "impl",
+      "to": "review"
+    },
+    {
+      "from": "review",
+      "to": "end"
+    }
+  ]
+}

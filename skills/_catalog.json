@@ -1,0 +1,41 @@
+{
+  "categories": [
+    "规划与需求",
+    "界面与设计",
+    "评审与验收",
+    "安全",
+    "研究与技能工程"
+  ],
+  "skills": {
+    "define-goal": {
+      "category": "规划与需求",
+      "note": "把模糊目标变成具体、可衡量的完成标准",
+      "origin": "许可证：Apache-2.0"
+    },
+    "frontend-design": {
+      "category": "界面与设计",
+      "note": "有设计感的界面方案，避免千篇一律的默认样式",
+      "origin": "许可证：Apache-2.0"
+    },
+    "headless-ui-check": {
+      "category": "评审与验收",
+      "note": "无头浏览器实测界面（面板自带工具，不开窗口）",
+      "origin": "许可证：MIT（本项目）"
+    },
+    "security-best-practices": {
+      "category": "安全",
+      "note": "按语言和框架做安全最佳实践审查",
+      "origin": "许可证：Apache-2.0"
+    },
+    "security-threat-model": {
+      "category": "安全",
+      "note": "基于代码库做威胁建模：信任边界、资产、攻击路径",
+      "origin": "许可证：Apache-2.0"
+    },
+    "skill-creator": {
+      "category": "研究与技能工程",
+      "note": "创建、修改、评测技能",
+      "origin": "许可证：Apache-2.0"
+    }
+  }
+}
