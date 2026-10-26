@@ -367,6 +367,23 @@
   .lamp { width: 32px; height: 32px; font-size: 10.5px; }
   .lamp.busy::after { background: var(--accent); animation: lampBusy 1.4s ease-in-out infinite; }
   @keyframes lampBusy { 0%, 100% { box-shadow: 0 0 0 0 var(--accent-ring); } 50% { box-shadow: 0 0 0 5px transparent, 0 0 10px var(--accent); } }
+  .sk-rail { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+  .sk-rail .lbl { font: 600 9.5px/1 var(--font-mono); letter-spacing: .14em; color: var(--faint); margin-right: 2px; }
+  .sk-rail.live .lbl { color: var(--accent); }
+  .skc { position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 6px; font: 500 11.5px/1 var(--font-mono); padding: 4px 8px 4px 7px;
+    border-radius: 7px; background: var(--sub); border: 1px solid var(--line); color: var(--muted); }
+  .skc::before { content: ''; width: 6px; height: 6px; border-radius: 1.5px; transform: rotate(45deg); background: var(--line-strong); flex: none; }
+  .skc.on { color: var(--text); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+  .skc.on::before { background: var(--accent); animation: skLed 1.6s ease-in-out infinite; }
+  .skc.new { animation: skIn .5s cubic-bezier(.2,.8,.2,1) both; animation-delay: var(--d); }
+  .skc.new::after { content: ''; position: absolute; inset: 0; pointer-events: none; transform: translateX(-120%);
+    background: linear-gradient(100deg, transparent 25%, color-mix(in srgb, var(--accent) 30%, rgba(255,255,255,.7)) 50%, transparent 75%);
+    animation: skSweep .8s ease-out both; animation-delay: calc(var(--d) + 260ms); }
+  .skc.auto { border-style: dashed; background: transparent; }
+  .skc.auto::before { border-radius: 50%; transform: none; }
+  @keyframes skIn { from { opacity: 0; transform: translateY(7px) scale(.88); filter: blur(2px); } }
+  @keyframes skSweep { to { transform: translateX(120%); } }
+  @keyframes skLed { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 7px var(--accent); } }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 </style>
 </head>
@@ -871,6 +888,20 @@ function liveBlock(r) {
 const lastRun = (key, kind) => S.runs.find(r => r.storyKey === key && (!kind || r.kind === kind));
 const planFor = key => S.plan && (S.plan.assignments || []).find(a => a.key === key);
 const pendingDeps = key => { const p = planFor(key); return p && p.depends_on ? p.depends_on.filter(k => (S.stories.find(s => s.key === k) || {}).status !== 'done') : []; };
+// 技能条：第一次出现的技能逐个“装入”（跨重绘保持进度，不会重播）；live = 正在用这些技能干活
+const SK_SEEN = new Map();
+const skName = id => String(id).replace(/^[\w-]+:/, '');
+function skillRail(key, list, live = false, auto = []) {
+  if (!list || !list.length) return '';
+  list = list.filter((id, i) => list.findIndex(x => skName(x) === skName(id)) === i); // project:x 和 x 算同一个
+  const t = Date.now();
+  return `<div class="sk-rail ${live ? 'live' : ''}"><span class="lbl">${live ? 'LOADED' : 'SKILLS'}</span>${list.map((id, i) => {
+    const k = key + '|' + id; if (!SK_SEEN.has(k)) SK_SEEN.set(k, t);
+    const age = t - SK_SEEN.get(k), anim = age < 1600 + i * 90;
+    const isAuto = auto.some(x => skName(x) === skName(id));
+    return `<span class="skc ${live ? 'on' : ''} ${anim ? 'new' : ''} ${isAuto ? 'auto' : ''}" style="--d:${i * 90 - age}ms" title="${esc(id)}${isAuto ? '（系统推荐，自动带上）' : '（Leader 选的）'}">${esc(skName(id))}</span>`;
+  }).join('')}</div>`;
+}
 function storyCard(s) {
   const plan = planFor(s.key), impl = lastRun(s.key, 'implement'), rev = lastRun(s.key, 'review');
   const act = S.runs.find(r => r.storyKey === s.key && ['queued', 'running'].includes(r.status));
@@ -897,6 +928,7 @@ function storyCard(s) {
   return `<div class="card story ${act ? 'running' : ''}" style="--c:${s.agent ? color(s.agent) : 'var(--line)'}">
     <div class="top"><span class="num">${s.epic}.${s.n}</span><span class="title grow" style="margin:0">${esc(s.title)}</span>${owner}</div>
     ${tags ? `<div class="row" style="gap:4px;margin-top:6px">${tags}</div>` : ''}
+    ${s.status !== 'done' || act ? skillRail('story|' + s.key, (S.storySkills || {})[s.key], !!act && act.kind === 'implement', (S.storyAutoSkills || {})[s.key] || []) : ''}
     ${act ? liveBlock(act) : ''}${rel ? `<div class="box">临时任务：${esc(rel.title || '')}</div>${liveBlock(rel)}` : ''}
     ${details ? `<details class="more"><summary>详情</summary>${details}</details>` : ''}
     ${actions ? `<div class="actions">${actions}</div>` : ''}</div>`;
@@ -924,7 +956,7 @@ function leaderView() {
   const L = S.leaderBoard || {}, tick = S.runs.find(r => r.kind === 'tick' && ['queued', 'running'].includes(r.status));
   const pr = L.progress;
   const ACT = { dispatch: '派活', set_status: '验收', approve_node: '通过节点', rerun_node: '重做节点', ask_human: '提问', finish: '宣布完成' };
-  const actLine = a => `<li><b>${ACT[a.type] || a.type}</b> ${a.agent ? '→ <span style="color:' + color(a.agent) + '">' + esc(agentName(a.agent)) + '</span> ' : ''}${esc(a.story ? 'Story ' + shortKey(a.story) : a.node ? '节点 ' + a.node : a.title || '')}${a.status ? '：' + (a.status === 'done' ? '通过' : '打回') : ''}${a.feedback ? '<div class="small muted clamp2" onclick="this.classList.toggle(\'open\')">' + esc(a.feedback) + '</div>' : ''}${a.instructions ? '<div class="small muted clamp2" onclick="this.classList.toggle(\'open\')">' + esc(a.instructions) + '</div>' : ''}${a.question ? '<div class="small">' + esc(a.question) + '</div>' : ''}${a.evidence && a.evidence.length ? '<div class="small muted">证据 ' + a.evidence.length + ' 条：' + a.evidence.filter(e => e.pass).length + ' 条通过</div>' : ''}${a.outcome && a.outcome !== 'ok' ? ' <span style="color:var(--bad)">' + esc(a.outcome) + '</span>' : ''}</li>`;
+  const actLine = (a, tk) => `<li><b>${ACT[a.type] || a.type}</b> ${a.agent ? '→ <span style="color:' + color(a.agent) + '">' + esc(agentName(a.agent)) + '</span> ' : ''}${esc(a.story ? 'Story ' + shortKey(a.story) : a.node ? '节点 ' + a.node : a.title || '')}${a.status ? '：' + (a.status === 'done' ? '通过' : '打回') : ''}${a.feedback ? '<div class="small muted clamp2" onclick="this.classList.toggle(\'open\')">' + esc(a.feedback) + '</div>' : ''}${a.instructions ? '<div class="small muted clamp2" onclick="this.classList.toggle(\'open\')">' + esc(a.instructions) + '</div>' : ''}${a.type === 'dispatch' && a.skills && a.skills.length ? skillRail('log|' + tk + '|' + (a.story || a.title || ''), a.skills, false, a.autoSkills || []) : ''}${a.question ? '<div class="small">' + esc(a.question) + '</div>' : ''}${a.evidence && a.evidence.length ? '<div class="small muted">证据 ' + a.evidence.length + ' 条：' + a.evidence.filter(e => e.pass).length + ' 条通过</div>' : ''}${a.outcome && a.outcome !== 'ok' ? ' <span style="color:var(--bad)">' + esc(a.outcome) + '</span>' : ''}</li>`;
   return `
   <div class="card"><div class="row"><h3 style="margin:0">🧠 Leader 统筹</h3>
     <span class="chip ${S.mode === 'leader' ? 'run' : ''}">${S.mode === 'leader' ? '已开启' : '未开启（顶栏切到“Leader 统筹”）'}</span>
@@ -949,7 +981,7 @@ function leaderView() {
   </div>
   <div class="card"><b>决策记录</b>（最新在上）
     ${(L.log || []).map(t => `<div class="box"><div class="row"><b>${new Date(t.at).toLocaleTimeString()}</b>${t.progress && t.progress.reason ? '<span class="small muted">' + esc(t.progress.reason) + '</span>' : ''}<span class="grow"></span><button class="link" onclick="openLog('${t.run}')">这轮的简报和输出</button></div>
-      ${t.actions.length ? '<ul style="margin:4px 0;padding-left:18px">' + t.actions.map(actLine).join('') + '</ul>' : '<div class="small muted">没有动作（等正在运行的任务）</div>'}</div>`).join('') || '<div class="small muted" style="margin-top:6px">还没有记录</div>'}</div>`;
+      ${t.actions.length ? '<ul style="margin:4px 0;padding-left:18px">' + t.actions.map(a => actLine(a, t.run)).join('') + '</ul>' : '<div class="small muted">没有动作（等正在运行的任务）</div>'}</div>`).join('') || '<div class="small muted" style="margin-top:6px">还没有记录</div>'}</div>`;
 }
 window.setAcceptLevel = async v => { S = await api('/api/mode', { acceptLevel: v }); toast('验收档位：' + ({ fast: '快速', standard: '标准', strict: '严格' })[v], 'ok'); renderPage(); };
 window.noteLeader = async () => { const t = $('leaderNote').value.trim(); if (!t) return toast('先写内容'); S = await api('/api/leader/note', { text: t }); toast('已转给 Leader，它下一轮会看到', 'ok'); renderPage(); };

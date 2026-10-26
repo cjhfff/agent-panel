@@ -8,6 +8,7 @@
 - 网页里直接看每个 agent 的实时命令行输出
 - Leader 统筹模式：参考 Magentic-One 的 Orchestrator，维护全局笔记和进度判断，自己派活、验收、打回、提问、宣布完成
 - 技能库：给 Leader 和每个节点挂技能，运行前自动装进项目的 `.claude/skills` / `.agents/skills`
+- 派活时 Leader 选的技能 + 系统按 Story 内容推荐的技能自动合并，看板和决策记录里能看到每个任务带了哪些（实线 = Leader 选的，虚线 = 系统补的）
 - 无头界面验收工具：用本机已装的 Edge / Chrome 跑 `--headless`，通过 CDP 实测页面，不开窗口
 
 > ⚠️ 默认给 agent **最高权限**（无审批、无沙箱），只适合测试机或虚拟机。可在设置里切到“标准”档。

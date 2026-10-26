@@ -248,7 +248,7 @@ function snapshot() {
   return {
     project: p.root, projectName: path.basename(p.root), recent: config.recent.filter(exists), projectsRoot: config.projectsRoot,
     bmadInstalled: exists(path.join(p.root, '_bmad')), hasEpics: exists(p.epics), hasSprint: exists(p.sprint), maxParallel: config.maxParallel,
-    agents, epics: parsed.epics, stories, leader: st.leader, leaderSkills: st.leaderSkills || [], acceptance: st.acceptance || {}, mode: st.mode || 'manual', maxRounds: st.maxRounds || 2, acceptLevel: acceptLevel(st), leaderBoard: (() => { const L = st.leaderBoard || {}; return { notes: L.notes || '', progress: L.progress || null, ask: L.ask || null, finished: L.finished || null, error: L.error || null, ticks: L.ticks || 0, lastTickAt: L.lastTickAt || null, log: (L.log || []).slice(-30).reverse(), answers: L.answers || [] }; })(), autoRounds: st.autoRounds || {}, plan: readPlan(p), stages: stageInfo(p, st),
+    agents, epics: parsed.epics, stories, leader: st.leader, leaderSkills: st.leaderSkills || [], acceptance: st.acceptance || {}, mode: st.mode || 'manual', maxRounds: st.maxRounds || 2, acceptLevel: acceptLevel(st), leaderBoard: (() => { const L = st.leaderBoard || {}; return { notes: L.notes || '', progress: L.progress || null, ask: L.ask || null, finished: L.finished || null, error: L.error || null, ticks: L.ticks || 0, lastTickAt: L.lastTickAt || null, log: (L.log || []).slice(-30).reverse(), answers: L.answers || [] }; })(), autoRounds: st.autoRounds || {}, storySkills: (() => { const out = {}, pl = readPlan(p); for (const x of (pl && pl.assignments) || []) if (x.skills && x.skills.length) out[fullStoryKey(p, x.key)] = [...x.skills]; for (const [k, v] of Object.entries(st.leaderInstr || {})) if (v.skills && v.skills.length) out[k] = [...new Set([...(out[k] || []), ...v.skills])]; return out; })(), storyAutoSkills: Object.fromEntries(Object.entries(st.leaderInstr || {}).map(([k, v]) => [k, v.autoSkills || []])), plan: readPlan(p), stages: stageInfo(p, st),
     runs: st.runs.slice(-80).reverse().map(r => ({ ...r, lastLine: live.get(r.id) || r.lastLine, lastOutputAt: lastOut.get(r.id) || null })), docs,
   };
 }
@@ -1232,7 +1232,7 @@ ${acceptRules(acceptLevel(st))}
 6. 规划按顺序推进：需求 → PRD → 架构 → 拆分；拆分通过后才有 Story。规划节点的开放问题由你拍板，把决定写进 approve_node 前的笔记里。
 7. 没有可做的事、只需等正在运行的任务时，actions 给空数组即可。
 8. 不要派需要打开浏览器窗口、操作桌面、读写系统剪贴板、安装软件的任务。界面实测一律用 ui-check 无头工具（这是允许的，不冲突），能自动测的都要测。实在测不了的（真实系统剪贴板、和真 Excel 往返、下载对话框）才留给客户，最多 3 条，写在 finish 的 summary 里。
-9. 派活时 skills 从该 Story 的“推荐技能”里挑，界面类 Story 必须带 panel:headless-ui-check 让实现者自测。
+9. 派 Story 时，该 Story 的“推荐技能”会由面板自动带上，skills 里不用重复写；只写推荐之外你认为这次还需要的技能（技能库里挑，可空）。
 10. 修复类问题优先打回给原负责人：先 set_status 为 ready-for-dev 并写清 feedback，再 dispatch 同一个 story 给原负责人。原负责人失败 3 次以上才换人或开临时任务。
 11. 结果为 blocked 的 Story 也要处理：看清阻塞原因，打回原负责人或拆小。
 12. 临时任务必须带 "story" 字段注明属于哪个 Story（无关则留空），看板会显示。
@@ -1314,9 +1314,14 @@ function applyTick(p, run, result) {
       if (a.type === 'dispatch') {
         if (a.story && !a.title) {
           if (readSprint(p.sprint)[a.story] === 'done') throw new Error('Story 已完成');
+          // 系统推荐的技能自动并进 Leader 选的（按去掉 project:/panel: 前缀后的名字去重），记下哪些是补进来的
+          const story = parseEpics(p.epics).stories.find(x => a.story.startsWith(`${x.epic}-${x.n}-`)) || {};
+          const bare = id => String(id).replace(/^[\w-]+:/, ''), chosen = Array.isArray(a.skills) ? a.skills : [];
+          a.autoSkills = recommendSkills(p, story).filter(id => !chosen.some(c => bare(c) === bare(id)));
+          a.skills = [...chosen, ...a.autoSkills];
           const s2 = loadState(p);
           s2.assignments[a.story] = a.agent;
-          s2.leaderInstr = s2.leaderInstr || {}; s2.leaderInstr[a.story] = { instructions: a.instructions || '', skills: a.skills || [], writes: a.writes || [] };
+          s2.leaderInstr = s2.leaderInstr || {}; s2.leaderInstr[a.story] = { instructions: a.instructions || '', skills: a.skills || [], autoSkills: a.autoSkills || [], writes: a.writes || [] };
           saveState(p, s2);
           enqueue({ kind: 'implement', storyKey: a.story, agentId: a.agent });
         } else enqueue({ kind: 'task', agentId: a.agent, title: a.title || '临时任务', instructions: a.instructions || '', skills: a.skills || [], relatedStory: a.story || null });
