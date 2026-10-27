@@ -1,16 +1,60 @@
 {
   "categories": [
-    "规划与需求",
     "界面与设计",
+    "文档",
+    "嵌入式",
+    "运维（通用）",
+    "规划与需求",
     "评审与验收",
+    "开发流程",
     "安全",
     "研究与技能工程"
   ],
   "skills": {
+    "a11y-audit": {
+      "category": "界面与设计",
+      "note": "WCAG 2.2 无障碍审查：对比度、键盘可达、读屏标签，附扫描和对比度检查脚本",
+      "origin": "许可证：MIT"
+    },
+    "changelog-generator": {
+      "category": "文档",
+      "note": "按提交记录生成发布说明和版本号（脚本只读 git log）",
+      "origin": "许可证：MIT"
+    },
+    "code-documenter": {
+      "category": "文档",
+      "note": "注释、API 文档、用户指南；里面的 npx / pip 校验步骤跳过（面板禁止下载安装）",
+      "origin": "许可证：MIT"
+    },
+    "cpp-pro": {
+      "category": "嵌入式",
+      "note": "现代 C++（C++20/23）写法、模板、性能优化与调试",
+      "origin": "许可证：MIT"
+    },
+    "database-optimizer": {
+      "category": "运维（通用）",
+      "note": "PostgreSQL / MySQL 慢查询排查与索引优化",
+      "origin": "许可证：MIT"
+    },
     "define-goal": {
       "category": "规划与需求",
       "note": "把模糊目标变成具体、可衡量的完成标准",
       "origin": "许可证：Apache-2.0"
+    },
+    "docker-development": {
+      "category": "运维（通用）",
+      "note": "Dockerfile 优化、docker-compose 编排检查、镜像安全建议（附本地分析脚本）",
+      "origin": "许可证：MIT"
+    },
+    "embedded-iot-mentor": {
+      "category": "嵌入式",
+      "note": "选型：MCU / 开发板 / 工具链，传感器数据在哪处理、怎么联网",
+      "origin": "许可证：MIT"
+    },
+    "embedded-systems": {
+      "category": "嵌入式",
+      "note": "MCU 固件、RTOS 任务划分、中断、低功耗、外设驱动",
+      "origin": "许可证：MIT"
     },
     "frontend-design": {
       "category": "界面与设计",
@@ -21,6 +65,31 @@
       "category": "评审与验收",
       "note": "无头浏览器实测界面（面板自带工具，不开窗口）",
       "origin": "许可证：MIT（本项目）"
+    },
+    "incident-commander": {
+      "category": "运维（通用）",
+      "note": "线上故障从发现到复盘：分级、时间线还原、复盘报告（附本地脚本）",
+      "origin": "许可证：MIT"
+    },
+    "monitoring-expert": {
+      "category": "运维（通用）",
+      "note": "结构化日志、Prometheus / Grafana 看板、告警规则设计",
+      "origin": "许可证：MIT"
+    },
+    "performance-profiler": {
+      "category": "开发流程",
+      "note": "Node / Python / Go 的 CPU、内存、I/O 瓶颈定位（脚本只读本地文件）",
+      "origin": "许可证：MIT"
+    },
+    "postgres-pro": {
+      "category": "运维（通用）",
+      "note": "PostgreSQL 查询优化、配置调优、复制与高级特性",
+      "origin": "许可证：MIT"
+    },
+    "runbook-generator": {
+      "category": "运维（通用）",
+      "note": "按服务生成运维手册：部署、故障处理、维护、回滚",
+      "origin": "许可证：MIT"
     },
     "security-best-practices": {
       "category": "安全",
@@ -36,6 +105,16 @@
       "category": "研究与技能工程",
       "note": "创建、修改、评测技能",
       "origin": "许可证：Apache-2.0"
+    },
+    "test-master": {
+      "category": "开发流程",
+      "note": "测试策略：用例设计、mock、覆盖率、测试架构",
+      "origin": "许可证：MIT"
+    },
+    "ui-design-system": {
+      "category": "界面与设计",
+      "note": "从一个主色生成整套设计变量（颜色、间距、字号），输出 CSS 变量，适合零依赖网页",
+      "origin": "许可证：MIT"
     }
   }
 }

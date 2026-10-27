@@ -1124,8 +1124,25 @@ function recommendSkills(p, story) {
   if (/导入|导出|保存|存储|CSV|JSON|文件|序列化|恢复/.test(text)) out.push('panel:test-driven-development', 'project:bmad-review');
   if (/安全|权限|登录|密钥|认证|加密/.test(text)) out.push('panel:security-best-practices');
   if (/Docker|容器|部署|nginx|监控|告警|日志|故障|运维|数据库|PostgreSQL|SQL/i.test(text)) out.push('panel:docker-development', 'panel:postgres-pro', 'panel:monitoring-expert');
+  if (exists(path.join(p.root, 'docs', 'embedded-standards.md')) || /固件|MCU|单片机|STM32|ESP32|RTOS|FreeRTOS|中断|外设|驱动|GPIO|UART|SPI|I2C|ADC|PWM|定时器|低功耗|寄存器|HAL|Bootloader/i.test(text)) out.push('panel:embedded-systems');
+  if (/选型|传感器|开发板|IoT|物联网|MQTT|BLE|蓝牙|WiFi|LoRa/i.test(text)) out.push('panel:embedded-iot-mentor');
+  if (/C\+\+|cpp|模板元|RAII|智能指针/i.test(text)) out.push('panel:cpp-pro');
+  if (/测试策略|测试用例|测试架构|覆盖率|mock|桩|单元测试|集成测试|端到端|e2e|回归测试|测试框架|自动化测试/i.test(text)) out.push('panel:test-master');
+  if (/性能|卡顿|变慢|很慢|太慢|慢查询|内存占用|泄漏|延迟|吞吐|性能优化|优化性能|提速/i.test(text)) out.push('panel:performance-profiler');
+  if (/文档|使用说明|说明文档|README|使用指南|注释|API 文档|快速上手/i.test(text)) out.push('panel:code-documenter');
+  if (/发布说明|发版|版本号|版本发布|更新日志|changelog|release notes|语义化版本|semver/i.test(text)) out.push('panel:changelog-generator');
   out.push('project:bmad-build', 'panel:verification-before-completion');
-  return [...new Set(out)].filter(id => have.has(id));
+  let selected = [...new Set(out)].filter(id => have.has(id));
+  if (selected.length > 6) {
+    // 先为实际存在的两个保底技能预留槽位；过滤缺失项后再截断，避免浪费名额。
+    const required = ['project:bmad-build', 'panel:verification-before-completion'].filter(id => have.has(id));
+    // 超限时：嵌入式（系统 > IoT > C++）> 界面（沿用原顺序）> 其他（原匹配顺序）。
+    // 系统技能排第一，确保嵌入式项目的每个 Story（包括界面 Story）都保留它。
+    const priority = ['panel:embedded-systems', 'panel:embedded-iot-mentor', 'panel:cpp-pro', 'panel:headless-ui-check', 'panel:frontend-design', 'panel:ui-design-system', 'panel:a11y-audit'];
+    const ranked = [...priority.filter(id => selected.includes(id)), ...selected.filter(id => !priority.includes(id) && !required.includes(id))];
+    selected = [...ranked.slice(0, 6 - required.length), ...required];
+  }
+  return selected.filter(id => have.has(id));
 }
 const ACCEPT_SKILLS = ['panel:review-agent', 'panel:verification-before-completion', 'project:bmad-qa-generate-e2e-tests', 'panel:headless-ui-check'];
 function crossCheckDone(p, st, key) {

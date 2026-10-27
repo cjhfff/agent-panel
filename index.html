@@ -433,6 +433,68 @@
   @keyframes skIn { from { opacity: 0; transform: translateY(7px) scale(.88); filter: blur(2px); } }
   @keyframes skSweep { to { transform: translateX(120%); } }
   @keyframes skLed { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 7px var(--accent); } }
+  /* Leader：先看状态和待办，记录按需展开 */
+  #main .page:has(> .leader-status, > .leader-status-off) { grid-template-columns: minmax(0, 1fr); container: leader / inline-size; }
+  #main .page:has(> .leader-status, > .leader-status-off) > .card { min-width: 0; overflow-wrap: anywhere; }
+  .leader-status { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 12px 24px; align-items: center; }
+  .leader-person, .leader-progress { min-width: 0; }
+  .leader-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 230px; font: 11px/1.5 var(--font-mono); }
+  .leader-state { display: inline-flex; gap: 7px; align-items: center; color: var(--state, var(--muted)); }
+  .leader-state .dot { background: currentColor; flex: none; }
+  .leader-state.thinking .dot { animation: led 1.6s ease-in-out infinite; }
+  .leader-progress progress { display: block; width: 100%; height: 5px; margin-top: 7px; border: 0; border-radius: 9px; overflow: hidden; background: var(--line); appearance: none; }
+  .leader-progress progress::-webkit-progress-bar { background: var(--line); }
+  .leader-progress progress::-webkit-progress-value { background: var(--ok); border-radius: 9px; }
+  .leader-progress progress::-moz-progress-bar { background: var(--ok); border-radius: 9px; }
+  .leader-controls { min-width: 0; justify-content: flex-end; gap: 10px; }
+  .leader-controls .seg { flex: none; }
+  .leader-controls .seg button { font-size: 12px; padding: 3px 9px; }
+  .leader-status-error { grid-column: 1 / -1; color: var(--bad); overflow-wrap: anywhere; }
+  .leader-ask { border-color: var(--warn); border-left: 3px solid var(--warn); }
+  .leader-delivery { border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); border-left: 3px solid var(--ok); }
+  .leader-ask .leader-copy, .leader-fold { margin-top: 8px; }
+  .leader-copy { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .leader-fold > summary { display: block; cursor: pointer; list-style: none; }
+  .leader-fold > summary::-webkit-details-marker, .leader-round > summary::-webkit-details-marker, .leader-waits > summary::-webkit-details-marker { display: none; }
+  .leader-fold:not([open]) .leader-copy { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .leader-fold.leader-notes:not([open]) .leader-copy { -webkit-line-clamp: 3; }
+  .leader-fold .leader-more, .leader-fold .leader-less { display: inline-block; margin-top: 5px; font-size: 12px; color: var(--accent); }
+  .leader-fold[open] .leader-more, .leader-fold:not([open]) .leader-less { display: none; }
+  .leader-compose { flex-wrap: nowrap; }
+  .leader-compose input { flex: 1; min-width: 0; }
+  .leader-compose label { font-weight: 600; white-space: nowrap; }
+  .leader-opinion-reason { margin-top: 6px; }
+  .leader-timeline { margin-top: 8px; }
+  .leader-round, .leader-waits { border-top: 1px solid var(--line); }
+  .leader-round > summary, .leader-waits > summary { display: flex; gap: 10px; align-items: center; padding: 10px 0; cursor: pointer; list-style: none; min-width: 0; }
+  .leader-round > summary::before, .leader-waits > summary::before { content: '▸'; color: var(--faint); font-size: 12px; width: 10px; flex: none; }
+  .leader-round[open] > summary::before, .leader-waits[open] > summary::before { content: '▾'; }
+  .leader-round > summary:hover, .leader-waits > summary:hover { background: var(--sub); }
+  .leader-time { font: 11px/1.5 var(--font-mono); color: var(--muted); flex: none; }
+  .leader-reason { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+  .leader-pills { display: flex; flex-wrap: wrap; gap: 5px; min-width: 0; max-width: 52%; }
+  .leader-pills:empty { display: none; }
+  .leader-pill { --pill: var(--muted); display: inline-block; flex: 0 1 auto; min-width: 0; max-width: 200px; padding: 1px 7px; border-radius: 6px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--pill); border: 1px solid color-mix(in srgb, var(--pill) 28%, var(--line)); background: color-mix(in srgb, var(--pill) 6%, var(--panel)); }
+  .leader-round-body, .leader-wait-body { padding: 2px 0 12px 20px; font-size: 12px; }
+  .leader-round-body > ul { margin: 0 0 10px; padding-left: 18px; }
+  .leader-round-body li + li { margin-top: 10px; }
+  .leader-round-body .skc { min-width: 0; max-width: 100%; }
+  .leader-action-text { margin-top: 5px; }
+  .leader-wait-body .box { margin: 6px 0; }
+  .leader-history { display: block; margin: 10px auto 0; }
+  .leader-answers > summary { margin: 0 !important; }
+  @container leader (max-width: 800px) {
+    .leader-status { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }
+    .leader-controls { grid-column: 1 / -1; justify-content: flex-start; }
+    .leader-round > summary { display: grid; grid-template-columns: 10px auto minmax(0, 1fr); }
+    .leader-pills { grid-column: 3; max-width: 100%; }
+  }
+  @container leader (max-width: 500px) {
+    .leader-status { grid-template-columns: minmax(0, 1fr); }
+    .leader-compose { flex-wrap: wrap; }
+    .leader-compose label { flex-basis: 100%; }
+    .leader-round > summary { gap: 6px; }
+  }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 </style>
 </head>
@@ -1147,36 +1209,96 @@ async function hydrate() {
 }
 
 // ================= Leader 控制台 =================
+const LEADER_OPEN = new Set(), LEADER_HISTORY = new Set(); // 按项目保留展开状态，不受自动重绘影响
+const LEADER_ACT = { dispatch: '派活', set_status: '验收', approve_node: '通过节点', rerun_node: '重做节点', ask_human: '提问', finish: '宣布完成' };
+const leaderKey = (type, id = '') => S.project + '|' + type + '|' + id;
+const leaderLogKey = t => leaderKey('round', t.run || t.at);
+const leaderText = s => /\?{4,}/.test(String(s ?? '')) ? '（这条记录的文字已损坏）' : String(s ?? '');
+const leaderCopy = s => /\?{4,}/.test(String(s ?? '')) ? `<span class="muted">${leaderText(s)}</span>` : esc(s);
+const leaderTime = at => at ? new Date(at).toLocaleTimeString('zh-CN', { hour12: false }) : '—';
+const leaderNode = id => (W?.graph?.nodes.find(n => n.id === id) || {}).title || id;
+function leaderState(L) {
+  const active = (S.runs || []).filter(r => ['queued', 'running'].includes(r.status)), thinking = active.find(r => r.kind === 'tick'), jobs = active.filter(r => r.kind !== 'tick');
+  if (L.error) return { kind: 'paused', label: '已暂停', color: 'bad' };
+  if (L.ask && !L.ask.answered) return { kind: 'ask', label: '等你回答', color: 'warn' };
+  if (thinking) return { kind: 'thinking', label: '思考中', color: 'accent', run: thinking };
+  if (jobs.length) return { kind: 'working', label: `派活中 · ${jobs.length} 个任务在跑`, color: 'accent' };
+  if (L.finished) return { kind: 'finished', label: '已完成', color: 'ok' };
+  return { kind: 'idle', label: '空闲', color: 'muted' };
+}
+function leaderFold(type, text, notes = false) {
+  const key = leaderKey(type);
+  return `<details class="leader-fold ${notes ? 'leader-notes' : ''}" data-leader-key="${esc(key)}" ontoggle="rememberLeader(this)" ${LEADER_OPEN.has(key) ? 'open' : ''}><summary><div class="leader-copy">${leaderCopy(text)}</div><span class="leader-more">展开全文</span><span class="leader-less">收起全文</span></summary></details>`;
+}
+function leaderPills(actions) {
+  const passed = [...new Map(actions.filter(a => a.type === 'set_status' && a.status === 'done' && (!a.outcome || a.outcome === 'ok')).map(a => [a.story, a])).values()];
+  let passedShown = false;
+  return actions.map(a => {
+    const failed = a.outcome && a.outcome !== 'ok', target = a.story ? shortKey(a.story) : a.node ? leaderNode(a.node) : '', success = a.type === 'set_status' && a.status === 'done' && !failed;
+    if (success && passedShown) return ''; if (success) passedShown = true;
+    let label = LEADER_ACT[a.type] || a.type, c = 'var(--muted)', tip = [a.title, a.story, a.question, failed ? a.outcome : ''].filter(Boolean).join('\n');
+    if (a.type === 'dispatch') { label = '派活→' + agentName(a.agent); c = color(a.agent); }
+    else if (a.type === 'set_status') { label = (a.status === 'done' ? '✓ ' : '✗ ') + target; c = a.status === 'done' ? 'var(--ok)' : 'var(--bad)'; }
+    else if (a.type === 'approve_node') { label = '通过节点 ' + target; c = 'var(--ok)'; }
+    else if (a.type === 'rerun_node') { label = '重做节点 ' + target; c = 'var(--bad)'; }
+    else if (a.type === 'ask_human') { label = '提问'; c = 'var(--warn)'; }
+    else if (a.type === 'finish') { label = '🏁 完成'; c = 'var(--ok)'; }
+    if (success && passed.length > 1) { label = `✓ ${passed.length} 个 Story`; tip = passed.map(x => x.story).join('\n'); }
+    if (failed) { label = '✗ ' + (LEADER_ACT[a.type] || a.type) + (target ? ' ' + target : '') + '失败'; c = 'var(--bad)'; }
+    return `<span class="leader-pill" style="--pill:${c}" title="${esc(leaderText(tip || label))}">${leaderCopy(label)}</span>`;
+  }).join('');
+}
+function leaderRoundBody(t) {
+  return `<ul>${(t.actions || []).map((a, i) => `<li><b>${leaderCopy(LEADER_ACT[a.type] || a.type)}</b>${a.agent ? ` → <span style="color:${color(a.agent)}">${leaderCopy(agentName(a.agent))}</span>` : ''} ${leaderCopy(a.story ? 'Story ' + shortKey(a.story) : a.node ? '节点 ' + leaderNode(a.node) : a.title || '')}${a.status ? '：' + (a.status === 'done' ? '通过' : '打回') : ''}
+      ${a.feedback ? `<div class="leader-copy leader-action-text" style="color:var(--bad)">打回意见：${leaderCopy(a.feedback)}</div>` : ''}${a.instructions ? `<div class="leader-copy leader-action-text muted">${leaderCopy(a.instructions)}</div>` : ''}
+      ${a.type === 'dispatch' ? skillRail('log|' + S.project + '|' + t.run + '|' + i, a.skills, false, a.autoSkills || []) : ''}
+      ${a.question ? `<div class="leader-copy leader-action-text">${leaderCopy(a.question)}</div>` : ''}${a.summary ? `<div class="leader-copy leader-action-text">${leaderCopy(a.summary)}</div>` : ''}
+      ${a.evidence?.length ? `<div class="small muted leader-action-text">证据 ${a.evidence.length} 条：${a.evidence.filter(e => e.pass === true).length} 条通过</div>` : ''}${a.outcome && a.outcome !== 'ok' ? `<div class="leader-copy leader-action-text" style="color:var(--bad)">${leaderCopy(a.outcome)}</div>` : ''}</li>`).join('')}</ul>
+    ${t.run ? `<button class="link" onclick="openLog('${jsq(t.run)}')">这轮的简报和输出</button>` : ''}`;
+}
+window.rememberLeader = el => {
+  if (!el.isConnected) return; // 忽略上一次重绘已移除的 details 事件
+  const key = el.dataset.leaderKey, keys = el.dataset.leaderWaits ? JSON.parse(el.dataset.leaderWaits) : [key];
+  for (const k of keys) { if (el.open) LEADER_OPEN.add(k); else LEADER_OPEN.delete(k); }
+  if (el.open && el.classList.contains('leader-round')) {
+    const body = el.querySelector('.leader-round-body'), t = (S.leaderBoard?.log || []).find(t => leaderLogKey(t) === key);
+    if (t && !body.hasChildNodes()) body.innerHTML = leaderRoundBody(t); // 真正展开时才装入技能条
+  }
+};
+window.showLeaderHistory = () => { LEADER_HISTORY.add(S.project); const card = document.querySelector('.leader-history-card'); if (card) card.outerHTML = leaderTimeline(S.leaderBoard || {}); };
+function leaderTimeline(L) {
+  const log = L.log || [], shown = LEADER_HISTORY.has(S.project) ? log : log.slice(0, 10), groups = [];
+  for (const t of shown) { // 后端已按最新在前返回，先分页，再合并相邻的等待轮次
+    if (!(t.actions || []).length && groups.at(-1)?.waits) groups.at(-1).waits.push(t);
+    else groups.push((t.actions || []).length ? { t } : { waits: [t] });
+  }
+  return `<div class="card leader-history-card"><div class="row"><b>决策记录</b><span class="small muted">最新在上 · 最近 ${shown.length} / 共 ${log.length} 轮</span></div><div class="leader-timeline">${groups.map(g => {
+    if (g.waits) {
+      const keys = g.waits.map(t => leaderKey('wait', t.run || t.at));
+      return `<details class="leader-waits" data-leader-waits="${esc(JSON.stringify(keys))}" ontoggle="rememberLeader(this)" ${keys.some(k => LEADER_OPEN.has(k)) ? 'open' : ''}><summary class="small muted"><time class="leader-time" title="${esc(new Date(g.waits[0].at).toLocaleString())}">${leaderTime(g.waits[0].at)}</time>等待正在运行的任务 ×${g.waits.length}</summary><div class="leader-wait-body">${g.waits.map(t => `<div class="box"><div class="small muted">${leaderTime(t.at)} · ${leaderCopy(t.progress?.reason || '等待任务结果')}</div>${t.run ? `<button class="link small" onclick="openLog('${jsq(t.run)}')">这轮的简报和输出</button>` : ''}</div>`).join('')}</div></details>`;
+    }
+    const t = g.t, key = leaderLogKey(t), reason = t.progress?.reason || '本轮未填写进度说明', open = LEADER_OPEN.has(key);
+    return `<details class="leader-round" data-leader-key="${esc(key)}" ontoggle="rememberLeader(this)" ${open ? 'open' : ''}><summary><time class="leader-time" title="${esc(new Date(t.at).toLocaleString())}">${leaderTime(t.at)}</time><span class="leader-reason" title="${esc(leaderText(reason))}">${leaderCopy(reason)}</span><span class="leader-pills">${leaderPills(t.actions)}</span></summary><div class="leader-round-body">${open ? leaderRoundBody(t) : ''}</div></details>`;
+  }).join('') || '<div class="small muted">还没有记录</div>'}</div>${log.length > shown.length ? `<button class="ghost small leader-history" onclick="showLeaderHistory()">显示更早的 ${log.length - shown.length} 轮</button>` : ''}</div>`;
+}
 function leaderView() {
-  const L = S.leaderBoard || {}, tick = S.runs.find(r => r.kind === 'tick' && ['queued', 'running'].includes(r.status));
-  const pr = L.progress;
-  const ACT = { dispatch: '派活', set_status: '验收', approve_node: '通过节点', rerun_node: '重做节点', ask_human: '提问', finish: '宣布完成' };
-  const actLine = (a, tk) => `<li><b>${ACT[a.type] || a.type}</b> ${a.agent ? '→ <span style="color:' + color(a.agent) + '">' + esc(agentName(a.agent)) + '</span> ' : ''}${esc(a.story ? 'Story ' + shortKey(a.story) : a.node ? '节点 ' + a.node : a.title || '')}${a.status ? '：' + (a.status === 'done' ? '通过' : '打回') : ''}${a.feedback ? '<div class="small muted clamp2" onclick="this.classList.toggle(\'open\')">' + esc(a.feedback) + '</div>' : ''}${a.instructions ? '<div class="small muted clamp2" onclick="this.classList.toggle(\'open\')">' + esc(a.instructions) + '</div>' : ''}${a.type === 'dispatch' && a.skills && a.skills.length ? skillRail('log|' + tk + '|' + (a.story || a.title || ''), a.skills, false, a.autoSkills || []) : ''}${a.question ? '<div class="small">' + esc(a.question) + '</div>' : ''}${a.evidence && a.evidence.length ? '<div class="small muted">证据 ' + a.evidence.length + ' 条：' + a.evidence.filter(e => e.pass).length + ' 条通过</div>' : ''}${a.outcome && a.outcome !== 'ok' ? ' <span style="color:var(--bad)">' + esc(a.outcome) + '</span>' : ''}</li>`;
-  return `
-  <div class="card"><div class="row"><h3 style="margin:0">🧠 Leader 统筹</h3>
-    <span class="chip ${S.mode === 'leader' ? 'run' : ''}">${S.mode === 'leader' ? '已开启' : '未开启（顶栏切到“Leader 统筹”）'}</span>
-    <span class="small muted">Leader：${esc(agentName(S.leader))}${(S.agents.find(x => x.id === S.leader) || {}).effectiveModel ? '（' + esc(S.agents.find(x => x.id === S.leader).effectiveModel) + '）' : ''} · 已唤醒 ${L.ticks || 0} 次${L.lastTickAt ? ' · 上次 ' + new Date(L.lastTickAt).toLocaleString() : ''}</span><span class="grow"></span>
-    ${tick ? `<span class="pulse">● 思考中 <span data-since="${tick.startedAt || tick.createdAt}"></span></span><button class="link" onclick="openLog('${tick.id}')">实时日志</button>` : (S.mode === 'leader' ? '<button onclick="api(\'/api/leader/tick\',{}).then(load)">立即唤醒 Leader</button>' : '')}</div>
-    ${tick ? `<div class="liveline" data-live="${tick.id}" style="margin-top:6px">${esc(tick.lastLine || '')}</div>` : ''}
-    ${L.error ? `<div class="box" style="color:var(--bad)">${esc(L.error)} <button onclick="api('/api/leader/resume',{}).then(load)">继续</button></div>` : ''}
-    ${L.finished ? `<div class="box" style="color:var(--ok)"><b>Leader 宣布完成</b>（${new Date(L.finished.at).toLocaleString()}）：${esc(L.finished.summary)} <button onclick="api('/api/leader/resume',{}).then(load)">继续做</button></div>` : ''}
-    ${L.ask && !L.ask.answered ? `<div class="box" style="border:1px solid var(--warn)"><b style="color:var(--warn)">Leader 在等你回答：</b>${esc(L.ask.q)}
-      <textarea id="leaderAns" rows="3" style="margin-top:6px"></textarea><div class="row" style="margin-top:6px"><span class="grow"></span><button class="primary" onclick="answerLeader()">回答</button></div></div>` : ''}
-  </div>
-  ${S.mode === 'leader' ? `<div class="card"><div class="row"><b>跟 Leader 说</b><span class="small muted">你是客户：提要求、改需求、表达偏好都写这里，Leader 下一轮会处理</span></div><div class="row" style="margin-top:8px"><textarea id="leaderNote" class="grow" rows="2" placeholder="例：公式栏字体大一点；先把 CSV 导入做稳，图表以后再说" style="flex:1"></textarea><button class="primary" onclick="$('leaderNote') ? noteLeader() : null">发送</button></div></div>` : ''}
-  <div class="card"><div class="row"><b>验收档位</b><span class="seg">${[['fast', '快速'], ['standard', '标准'], ['strict', '严格']].map(([k, l]) => `<button class="${S.acceptLevel === k ? 'on' : ''}" onclick="setAcceptLevel('${k}')">${l}</button>`).join('')}</span><span class="small muted">${({ fast: '实现者自测 + Leader 复跑测试就放行，不派交叉验收', standard: 'Leader 亲自验收、逐条给证据；拿不准才派交叉验收', strict: '每个 Story 都换人交叉验收，最稳但最慢' })[S.acceptLevel] || ''}</span></div></div>
-  <div class="grid2">
-    <div class="card"><div class="row"><b>全局笔记</b><span class="small muted">Leader 每轮自己更新：已完成、进行中、风险、下一步</span></div>
-      <div style="white-space:pre-wrap;margin-top:8px">${esc(L.notes || '（还没有，第一次唤醒后生成）')}</div>
-      ${pr ? `<div class="row" style="margin-top:10px">${pr.is_done ? '<span class="chip ok">需求已满足</span>' : '<span class="chip">未完成</span>'}${pr.making_progress === false ? '<span class="chip warn">没有进展</span>' : '<span class="chip ok">有进展</span>'}${pr.is_looping ? '<span class="chip bad">在兜圈子</span>' : ''}<span class="small muted">${esc(pr.reason || '')}</span></div>` : ''}</div>
-    <div class="card"><b>进度</b>
-      <div class="small" style="margin-top:8px">${S.stories.length ? COLS.map(([k, l]) => `${l} ${S.stories.filter(x => x.status === k).length}`).join(' · ') : '还没有 Story'}</div>
-      <div class="small muted" style="margin-top:6px">正在运行：${S.runs.filter(r => r.kind !== 'tick' && ['queued', 'running'].includes(r.status)).map(r => `${agentName(r.agent)} · ${KIND[r.kind] || r.kind} ${r.storyKey ? shortKey(r.storyKey) : r.nodeId || r.title || ''}`).join('；') || '无'}</div>
-      ${(L.answers || []).length ? `<details class="more small"><summary>你回答过的问题（${L.answers.length}）</summary><ul>${L.answers.map(a => '<li>' + esc(a.q) + '<br><span class="muted">→ ' + esc(a.a) + '</span></li>').join('')}</ul></details>` : ''}</div>
-  </div>
-  <div class="card"><b>决策记录</b>（最新在上）
-    ${(L.log || []).map(t => `<div class="box"><div class="row"><b>${new Date(t.at).toLocaleTimeString()}</b>${t.progress && t.progress.reason ? '<span class="small muted">' + esc(t.progress.reason) + '</span>' : ''}<span class="grow"></span><button class="link" onclick="openLog('${t.run}')">这轮的简报和输出</button></div>
-      ${t.actions.length ? '<ul style="margin:4px 0;padding-left:18px">' + t.actions.map(a => actLine(a, t.run)).join('') + '</ul>' : '<div class="small muted">没有动作（等正在运行的任务）</div>'}</div>`).join('') || '<div class="small muted" style="margin-top:6px">还没有记录</div>'}</div>`;
+  if (S.mode !== 'leader') return `<div class="card row leader-status-off"><b>未开启 Leader 统筹</b><span class="grow"></span><button class="primary" onclick="$('modeSeg').querySelector('[data-m=leader]').click()">切到 Leader 统筹</button></div>`;
+  const L = S.leaderBoard || {}, pr = L.progress, state = leaderState(L), agent = S.agents.find(a => a.id === S.leader) || {}, total = S.stories.length, done = S.stories.filter(s => s.status === 'done').length;
+  const since = state.run && (state.run.startedAt || state.run.createdAt), meta = `已唤醒 ${L.ticks || 0} 次${L.lastTickAt ? '\n上次唤醒：' + new Date(L.lastTickAt).toLocaleString() : ''}`;
+  const primary = state.kind === 'paused' ? `<button class="primary" onclick="api('/api/leader/resume',{}).then(load)">继续</button>` : state.kind === 'idle' ? `<button class="primary" ${!S.leader ? 'disabled' : ''} onclick="api('/api/leader/tick',{}).then(load)">立即唤醒</button>` : state.kind === 'thinking' ? `<button class="primary" onclick="openLog('${jsq(state.run.id)}')">实时日志</button>` : '';
+  const levels = [['fast', '快速', '实现者自测 + Leader 复跑测试就放行，不派交叉验收'], ['standard', '标准', 'Leader 亲自验收、逐条给证据；拿不准才派交叉验收'], ['strict', '严格', '每个 Story 都换人交叉验收，最稳但最慢']];
+  const answersKey = leaderKey('answers');
+  return `<div class="card leader-status">
+    <div class="leader-person" title="${esc(meta)}"><div class="row"><b style="color:${color(S.leader)}">${leaderCopy(agentName(S.leader))}</b>${agent.effectiveModel ? `<span class="leader-model" style="color:${color(S.leader)}" title="${esc(agent.effectiveModel)}">${leaderCopy(agent.effectiveModel)}</span>` : ''}</div><div class="row small"><span class="leader-state ${state.kind}" style="--state:var(--${state.color})"><span class="dot"></span>${state.label}${since ? ` · <span data-since="${esc(since)}">${fmtDur(Date.now() - Date.parse(since))}</span>` : ''}</span><span class="muted small">唤醒 ${L.ticks || 0} 次</span></div></div>
+    <div class="leader-progress"><div class="row small"><span>Story ${done} / ${total}</span><span class="grow"></span>${tlProject === S.project && Array.isArray(TL) ? `<span class="muted">返工 ${tlReworks()} 次</span>` : ''}</div><progress value="${done}" max="${total || 1}" aria-label="Story 完成 ${done} / ${total}"></progress></div>
+    <div class="row leader-controls"><span class="seg" aria-label="验收档位">${levels.map(([k, label, tip]) => `<button class="${S.acceptLevel === k ? 'on' : ''}" aria-pressed="${S.acceptLevel === k}" title="${esc(tip)}" onclick="setAcceptLevel('${k}')">${label}</button>`).join('')}</span>${primary}</div>
+    ${L.error ? `<div class="small leader-status-error">${leaderCopy(L.error)}</div>` : ''}</div>
+  ${L.ask && !L.ask.answered ? `<div class="card leader-ask"><b style="color:var(--warn)">Leader 在等你回答</b><div class="leader-copy">${leaderCopy(L.ask.q)}</div><label class="field" style="margin-top:8px"><span>你的回答</span><textarea id="leaderAns" rows="2"></textarea></label><div class="row" style="margin-top:6px"><span class="grow"></span><button class="primary" onclick="answerLeader()">回答</button></div></div>` : ''}
+  ${L.finished ? `<div class="card leader-delivery"><div class="row"><b style="color:var(--ok)">交付总结</b><span class="small muted">${L.finished.at ? new Date(L.finished.at).toLocaleString() : ''}</span><span class="grow"></span><button class="small" onclick="api('/api/leader/resume',{}).then(load)">继续做</button></div>${leaderFold('delivery', L.finished.summary || '已完成，暂无总结。')}</div>` : ''}
+  <div class="card row leader-compose"><label for="leaderNote" title="你是客户：提要求、改需求、表达偏好都写这里，Leader 下一轮会处理">跟 Leader 说</label><input id="leaderNote" placeholder="例：公式栏字体大一点；先把 CSV 导入做稳，图表以后再说" onkeydown="if(event.key === 'Enter' && !event.isComposing) { event.preventDefault(); noteLeader(); }"><button class="primary" onclick="noteLeader()">发送</button></div>
+  <div class="card leader-opinion"><div class="row"><b>Leader 的看法</b>${pr ? `${pr.is_done ? '<span class="chip ok">需求已满足</span>' : '<span class="chip">需求未完成</span>'}${pr.making_progress === false ? '<span class="chip warn">没有进展</span>' : pr.making_progress ? '<span class="chip ok">有进展</span>' : ''}${pr.is_looping ? '<span class="chip bad">在兜圈子</span>' : ''}` : ''}</div>${pr?.reason ? `<div class="small muted leader-opinion-reason">${leaderCopy(pr.reason)}</div>` : ''}${leaderFold('notes', L.notes || '（还没有，第一次唤醒后生成）', true)}</div>
+  ${leaderTimeline(L)}
+  ${L.answers?.length ? `<div class="card"><details class="more small leader-answers" data-leader-key="${esc(answersKey)}" ontoggle="rememberLeader(this)" ${LEADER_OPEN.has(answersKey) ? 'open' : ''}><summary>你回答过的问题（${L.answers.length}）</summary><ul>${L.answers.map(a => `<li>${leaderCopy(a.q)}<br><span class="muted">→ ${leaderCopy(a.a)}</span></li>`).join('')}</ul></details></div>` : ''}`;
 }
 window.setAcceptLevel = async v => { S = await api('/api/mode', { acceptLevel: v }); toast('验收档位：' + ({ fast: '快速', standard: '标准', strict: '严格' })[v], 'ok'); renderPage(); };
 window.noteLeader = async () => { const t = $('leaderNote').value.trim(); if (!t) return toast('先写内容'); S = await api('/api/leader/note', { text: t }); toast('已转给 Leader，它下一轮会看到', 'ok'); renderPage(); };
