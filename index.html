@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agent 统筹面板</title>
+<link rel="icon" href="data:,">
 <style>
   :root {
     /* 仪表盘配色：瓷白面板 + 钴蓝操作 + 指示灯 */
@@ -97,6 +98,54 @@
   .menu { position: absolute; z-index: 10; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px rgba(16,24,40,.15); padding: 6px; min-width: 220px; }
   .menu div { padding: 7px 10px; border-radius: 6px; cursor: pointer; display: flex; gap: 8px; align-items: center; } .menu div:hover { background: var(--accent-weak); }
   .menu .ic { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: #fff; font-size: 12px; background: var(--tc); }
+
+  /* 开发看板：随画布缩放的 Story 泳道 */
+  .dev-lanes { position: absolute; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); cursor: default; user-select: none; }
+  .dev-lanes.fresh { animation: devLanesIn .32s cubic-bezier(.2,.8,.2,1) both; }
+  @keyframes devLanesIn { from { opacity: 0; transform: translateY(-8px); } }
+  .dev-lanes-head { height: 48px; display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid var(--line); border-radius: 16px 16px 0 0; background: var(--sub); font-size: 12px; color: var(--muted); }
+  .dev-lanes-head b { font-size: 13px; font-weight: 650; color: var(--text); }
+  .dev-lanes-body { position: relative; }
+  .dev-lane { position: absolute; left: 0; right: 0; background: color-mix(in srgb, var(--c, var(--muted)) 4%, var(--panel)); border-top: 1px solid color-mix(in srgb, var(--c, var(--muted)) 12%, var(--line)); }
+  .dev-lane-label { position: absolute; left: 0; top: 0; bottom: 0; width: 172px; padding: 15px 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 5px; border-right: 1px solid color-mix(in srgb, var(--c, var(--muted)) 16%, var(--line)); background: color-mix(in srgb, var(--c, var(--muted)) 4%, transparent); z-index: 2; }
+  .dev-lane-name { max-width: 100%; font-size: 13px; font-weight: 650; color: var(--c, var(--muted)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dev-lane-model { max-width: 100%; font: 10.5px/1.5 var(--font-mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dev-lane-running { font: 11px/1.5 var(--font-mono); color: var(--muted); }
+  .dev-level { position: absolute; top: 0; height: 28px; width: 190px; padding: 6px 0; text-align: center; font: 10px/16px var(--font-mono); color: var(--faint); }
+  .dev-story { position: absolute; width: 190px; height: 76px; padding: 8px 10px; display: flex; flex-direction: column; gap: 5px; align-items: stretch; text-align: left; white-space: normal; background: var(--panel); border: 1px solid color-mix(in srgb, var(--c, var(--muted)) 28%, var(--line)); border-left: 3px solid var(--c, var(--line-strong)); border-radius: 10px; box-shadow: var(--shadow-sm); z-index: 2; cursor: pointer; }
+  .dev-story:hover:not(:disabled) { border-color: var(--c, var(--accent)); background: var(--panel); box-shadow: var(--shadow), 0 0 0 2px color-mix(in srgb, var(--c, var(--accent)) 10%, transparent); }
+  .dev-story:active:not(:disabled) { transform: none; }
+  .dev-story.sel { border-color: var(--accent); outline: 2px solid var(--accent-ring); outline-offset: 2px; }
+  .dev-story.running { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); animation: devStoryGlow 1.8s ease-in-out infinite; }
+  @keyframes devStoryGlow { 0%, 100% { box-shadow: var(--shadow-sm), 0 0 0 1px var(--accent-ring); } 50% { box-shadow: var(--shadow-sm), 0 0 16px 1px var(--accent-ring); } }
+  .dev-story-top { display: flex; gap: 6px; align-items: center; min-width: 0; line-height: 14px; }
+  .dev-story-num { font: 600 11px/14px var(--font-mono); color: var(--muted); margin-right: auto; }
+  .dev-story-lamp { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+  .dev-story-lamp.done { background: var(--ok); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 12%, transparent); }
+  .dev-story-lamp.review { background: var(--warn); box-shadow: 0 0 0 2px color-mix(in srgb, var(--warn) 14%, transparent); }
+  .dev-story-lamp.in-progress { background: var(--accent); animation: led 1.6s ease-in-out infinite; }
+  .dev-story-rework, .dev-story-skills { font: 10px/14px var(--font-mono); flex: none; }
+  .dev-story-rework { color: var(--bad); border-radius: 4px; padding: 0 3px; background: color-mix(in srgb, var(--bad) 9%, var(--panel)); }
+  .dev-story-skills { color: var(--muted); }
+  .dev-story-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 12px; font-weight: 550; line-height: 17px; color: var(--text); }
+  .dev-lane-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; z-index: 1; }
+  .dev-dep { fill: none; stroke: color-mix(in srgb, var(--muted) 65%, transparent); stroke-width: 1.5; }
+  .dev-dep.pending { stroke-dasharray: 5 4; }
+  .dev-dep.live { stroke: var(--accent); stroke-dasharray: 6 4; animation: dash 1s linear infinite; }
+  .dev-rework { fill: none; stroke: var(--bad); stroke-width: 1.3; stroke-dasharray: 4 3; }
+  .dev-rework-label { fill: var(--bad); font: 600 10px/1 var(--font-mono); paint-order: stroke; stroke: var(--panel); stroke-width: 3px; stroke-linejoin: round; }
+  .dev-handoff { fill: none; stroke: color-mix(in srgb, var(--muted) 38%, transparent); stroke-width: 1.3; stroke-dasharray: 3 5; pointer-events: stroke; cursor: help; }
+  .dev-connector { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+  .dev-connector path { fill: none; stroke: color-mix(in srgb, var(--t-dev) 50%, var(--line)); stroke-width: 1.6; stroke-dasharray: 4 4; }
+  .node .dev-lanes-toggle { margin-top: 4px; width: 100%; padding: 4px 8px; font-size: 12px; text-align: left; color: var(--accent); background: var(--accent-weak); border-color: color-mix(in srgb, var(--accent) 18%, var(--line)); box-shadow: none; }
+  .dev-lanes-hint { font-size: 11px; color: var(--muted); }
+  .dev-story-side .lane-track { flex-direction: column; align-items: stretch; overflow-x: hidden; padding: 4px 0; gap: 3px; }
+  .dev-story-side .lane-track .ev { width: 100%; min-width: 0; white-space: normal; }
+  .dev-story-side .lane-track .ev .s { max-width: none; white-space: normal; }
+  .dev-story-side .lane-track .arr { align-self: flex-start; margin-left: 12px; transform: rotate(90deg); line-height: 18px; }
+  .dev-story-side .lane-track .arr.loop { transform: none; animation: none; }
+  .dev-story-side .sk-rail { flex-wrap: wrap; min-width: 0; }
+  .dev-story-side .skc { max-width: 100%; white-space: normal; overflow-wrap: anywhere; line-height: 1.4; }
 
   /* 右侧节点面板 */
   /* Story 流程（泳道） */
@@ -423,7 +472,7 @@ const RUN_ST = { queued: '排队', running: '运行中', finished: '完成', fai
 const NODE_ST = { idle: ['未运行', ''], running: ['运行中', 'run'], waiting: ['待确认', 'warn'], done: ['完成', 'ok'], failed: ['失败', 'bad'] };
 const TYPES = { start: ['开始', '▶'], agent: ['Agent', '✦'], dev: ['开发看板', '▦'], human: ['人工确认', '✋'], end: ['结束', '■'] };
 const PRESETS = { '': '无（自定义指令）', prd: 'BMAD · PRD', architecture: 'BMAD · 架构', epics: 'BMAD · 拆分 Story' };
-let S = null, W = null, SKILLS = null, page = localStorage.getItem('page') || 'workflow', sel = null, selEdge = null, logRun = null;
+let S = null, W = null, SKILLS = null, page = localStorage.getItem('page') || 'workflow', sel = null, selEdge = null, selStory = null, logRun = null;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const jsq = s => esc(String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
@@ -473,11 +522,13 @@ async function load() {
   renderTop(); renderPage();
 }
 async function refresh() { // 不打断编辑的刷新
+  const previousProject = S?.project;
   S = await api('/api/state');
-  if (S.project) { const w = await api('/api/workflow'); W = { ...w, graph: graphDirty && W ? W.graph : w.graph }; }
+  if (S.project) { const w = await api('/api/workflow'); W = { ...w, graph: graphDirty && W && previousProject === S.project ? W.graph : w.graph }; } else W = null;
   renderTop();
+  if (previousProject !== S.project) { sel = null; selEdge = null; selStory = null; return renderPage(); }
   if (page === 'workflow' && W && wfView === 'flow') { loadTimeline().then(() => { renderFlow(); renderWfBar(); }); }
-  else if (page === 'workflow' && W) { drawNodes(); drawEdges(); renderRunBox(); renderWfBar(); loadTimeline().then(() => { drawNodes(); renderWfBar(); }); }
+  else if (page === 'workflow' && W) { drawNodes(); drawEdges(); if (selStory) renderSide(); else renderRunBox(); renderWfBar(); const project = S.project; loadTimeline(true).then(() => { if (S.project !== project || page !== 'workflow' || wfView !== 'canvas') return; drawNodes(); renderWfBar(); if (selStory || (sel && nodeById(sel)?.type === 'dev')) renderSide(); }); }
   else if (page === 'leader' && document.activeElement && ['leaderAns', 'leaderNote'].includes(document.activeElement.id)) return; // 正在给 Leader 写字，不打断
   else if (page !== 'settings' && page !== 'skills') renderPage();
 }
@@ -534,11 +585,15 @@ let view = { x: 40, y: 40, k: 1 }, graphDirty = false, saveTimer = null, drag = 
 // Story 流程（时间线）数据：/api/timeline；面板还没加载新接口时为 'unavailable'
 let wfView = localStorage.getItem('wfView') || 'canvas', TL = null, tlAt = 0, tlBusy = null, tlOnlyRework = false;
 const seenChips = new Set();
+let tlProject = null, tlRequest = 0, tlAgain = false;
 async function loadTimeline(force) {
   if (!S || !S.project) return TL;
+  const project = S.project;
+  if (tlProject !== project) { tlProject = project; TL = null; tlAt = 0; tlBusy = null; tlAgain = false; tlRequest++; }
+  if (tlBusy) { if (force) tlAgain = true; return tlBusy; }
   if (!force && Date.now() - tlAt < 3000) return tlBusy || TL;
-  tlAt = Date.now();
-  tlBusy = fetch('/api/timeline').then(r => r.ok ? r.json() : 'unavailable').catch(() => 'unavailable').then(x => { TL = x; tlBusy = null; return x; });
+  tlAt = Date.now(); const request = ++tlRequest;
+  tlBusy = fetch('/api/timeline').then(r => r.ok ? r.json() : 'unavailable').catch(() => 'unavailable').then(x => { if (request === tlRequest && project === S.project) { TL = x; tlBusy = null; if (tlAgain) { tlAgain = false; return loadTimeline(true); } } return x; });
   return tlBusy;
 }
 const tlList = () => Array.isArray(TL) ? TL : [];
@@ -547,18 +602,20 @@ window.setWfView = v => { wfView = v; localStorage.setItem('wfView', v); renderW
 const nodeById = id => W.graph.nodes.find(n => n.id === id);
 const nst = id => (W.states && W.states[id]) || { status: 'idle' };
 function renderWorkflow() {
+  if (devProject !== S.project) { devProject = S.project; selStory = null; sel = null; selEdge = null; }
   if (wfView === 'flow') {
     $('main').innerHTML = `<div class="wf"><div class="wf-bar" id="wfBar"></div><div class="flow" id="flow"><div class="muted small">加载 Story 流程…</div></div></div>`;
     renderWfBar();
     loadTimeline(true).then(() => { renderFlow(); renderWfBar(); });
     return;
   }
-  loadTimeline().then(() => { drawNodes(); renderWfBar(); if (sel && nodeById(sel) && nodeById(sel).type === 'dev') renderSide(); });
+  const project = S.project;
+  loadTimeline().then(() => { if (S.project !== project || page !== 'workflow' || wfView !== 'canvas') return; drawNodes(); renderWfBar(); if (selStory || (sel && nodeById(sel)?.type === 'dev')) renderSide(); });
   let saved = null; try { saved = JSON.parse(localStorage.getItem('view:' + S.project)); } catch {}
   if (saved) view = saved; else setTimeout(() => fitView(), 30);
   $('main').innerHTML = `<div class="wf">
     <div class="wf-bar" id="wfBar"></div>
-    <div class="canvas" id="canvas"><div class="world" id="world"><svg class="edges" id="edges"></svg><div id="nodes"></div></div>
+    <div class="canvas" id="canvas"><div class="world" id="world"><svg class="edges" id="edges"></svg><div id="nodes"></div><div id="devLanes"></div></div>
       <div class="zoom"><button onclick="zoomBy(1.2)">＋</button><button onclick="zoomBy(1/1.2)">－</button><button onclick="fitView()">适应</button></div></div>
     <div id="side"></div></div>`;
   renderWfBar(); applyView(); drawNodes(); drawEdges(); renderSide(); bindCanvas();
@@ -579,11 +636,13 @@ window.runWorkflow = async () => { await saveGraphNow(); if (!S.leader && W.grap
 window.applyTemplate = async file => { if (!file) return; if (!confirm('用模板替换当前工作流？已完成的产出文档不会删除。')) return; W = { ...W, ...(await api('/api/workflow/template', { file })) }; sel = null; renderWorkflow(); };
 function applyView() { const w = $('world'); if (w) w.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.k})`; localStorage.setItem('view:' + S.project, JSON.stringify(view)); }
 window.zoomBy = f => { const c = $('canvas').getBoundingClientRect(); zoomAt(c.width / 2, c.height / 2, f); };
-function zoomAt(cx, cy, f) { const k = Math.min(2, Math.max(.3, view.k * f)); view.x = cx - (cx - view.x) * k / view.k; view.y = cy - (cy - view.y) * k / view.k; view.k = k; applyView(); }
+function zoomAt(cx, cy, f) { const k = Math.min(2, Math.max(.08, view.k * f)); view.x = cx - (cx - view.x) * k / view.k; view.y = cy - (cy - view.y) * k / view.k; view.k = k; applyView(); }
 window.fitView = () => {
-  const ns = W.graph.nodes; if (!ns.length) return;
-  const c = $('canvas').getBoundingClientRect(), minX = Math.min(...ns.map(n => n.x)), minY = Math.min(...ns.map(n => n.y)), maxX = Math.max(...ns.map(n => n.x + 230)), maxY = Math.max(...ns.map(n => n.y + 120));
-  const k = Math.min(1.2, Math.max(.3, Math.min((c.width - (sel ? 460 : 60)) / (maxX - minX), (c.height - 60) / (maxY - minY))));
+  const ns = W?.graph.nodes; if (!ns?.length || !$('canvas')) return;
+  const bounds = ns.map(n => ({ x: n.x, y: n.y, w: 230, h: graphNodeHeight(n) }));
+  for (const p of document.querySelectorAll('#devLanes .dev-lanes')) bounds.push({ x: p.offsetLeft, y: p.offsetTop, w: p.offsetWidth, h: p.offsetHeight });
+  const c = $('canvas').getBoundingClientRect(), minX = Math.min(...bounds.map(n => n.x)), minY = Math.min(...bounds.map(n => n.y)), maxX = Math.max(...bounds.map(n => n.x + n.w)), maxY = Math.max(...bounds.map(n => n.y + n.h));
+  const k = Math.min(1.2, Math.max(.08, Math.min((c.width - (sel || selStory ? 460 : 60)) / (maxX - minX), (c.height - 60) / (maxY - minY))));
   view = { k, x: 30 - minX * k, y: (c.height - (maxY - minY) * k) / 2 - minY * k }; applyView();
 };
 // 一个事件 → 一个 chip
@@ -636,6 +695,121 @@ function renderFlow() {
 function miniIcons(s) { return s.events.map(e => ({ impl: '🛠', qa: '🔍', task: '🧩', review: '⚖', reject: '✗', accept: '✓', denied: '⛔' }[e.type] || '·')).join('') + (s.status === 'done' ? '🏁' : ''); }
 function nodeAgentLabel(n) { const c = n.config || {}; return !c.agent || c.agent === 'leader' ? `Leader（${S.leader ? agentName(S.leader) : '未选'}）` : agentName(c.agent); }
 function nodeAgentId(n) { const c = n.config || {}; return !c.agent || c.agent === 'leader' ? S.leader : c.agent; }
+// 开发看板的派生子图：只读 Story/计划/时间线，绝不写入 graph。
+let devProject = null, devSerial = 0;
+const DEV_SEEN = new Set(), DEV_OPEN = new Map();
+const storyAlias = key => String(key || '').match(/^(\d+)[.-](\d+)(?:-|$)/)?.slice(1).join('-') || String(key || '');
+const storyKeyFor = key => (S.stories.find(s => s.key === key) || S.stories.find(s => storyAlias(s.key) === storyAlias(key)))?.key;
+const storyValue = (map, key) => map?.[key] || Object.entries(map || {}).find(([k]) => storyAlias(k) === storyAlias(key))?.[1];
+function devOpen() {
+  if (!DEV_OPEN.has(S.project)) { let saved = {}; try { saved = JSON.parse(localStorage.getItem('devLanes:' + S.project)) || {}; } catch {} DEV_OPEN.set(S.project, saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {}); }
+  return DEV_OPEN.get(S.project);
+}
+const devIsOpen = id => !!devOpen()[id];
+function graphNodeHeight(n) { return Array.from($('nodes')?.children || []).find(el => el.dataset.id === n.id)?.offsetHeight || 120; }
+function storySkills(s) {
+  const auto = storyValue(S.storyAutoSkills, s.key) || [], list = [...(storyValue(S.storySkills, s.key) || planFor(s.key)?.skills || []), ...auto];
+  return { auto, list: list.filter((id, i) => list.findIndex(x => skName(x) === skName(id)) === i) };
+}
+function devLaneData() {
+  const timelines = new Map(tlList().map(s => [storyKeyFor(s.key), s])), runs = S.runs || [];
+  const cells = S.stories.map(s => {
+    const plan = planFor(s.key), tl = timelines.get(s.key) || { ...s, events: [], reworks: 0 }, refs = [...new Set(plan?.depends_on || [])];
+    return { s, tl, owner: s.agent || plan?.agent || '', refs, deps: [...new Set(refs.map(storyKeyFor).filter(Boolean))], missing: refs.filter(k => !storyKeyFor(k)), running: runs.some(r => r.status === 'running' && [r.storyKey, r.relatedStory].some(k => k && storyKeyFor(k) === s.key)), skills: storySkills(s), level: 0 };
+  }), byKey = new Map(cells.map(c => [c.s.key, c]));
+  // 强连通分量合并成一列，再按依赖分层；环和缺失引用都不会阻塞布局。
+  let seq = 0; const stack = [], components = [];
+  function visit(c) {
+    c.idx = c.low = seq++; stack.push(c); c.onStack = true;
+    for (const key of c.deps) { const d = byKey.get(key); if (d.idx == null) { visit(d); c.low = Math.min(c.low, d.low); } else if (d.onStack) c.low = Math.min(c.low, d.idx); }
+    if (c.low === c.idx) { const group = []; let d; do { d = stack.pop(); d.onStack = false; d.component = components.length; group.push(d); } while (d !== c); components.push(group); }
+  }
+  cells.forEach(c => { if (c.idx == null) visit(c); });
+  const levels = new Map();
+  function level(i) { if (levels.has(i)) return levels.get(i); const deps = new Set(components[i].flatMap(c => c.deps.map(k => byKey.get(k).component)).filter(j => j !== i)); const value = deps.size ? Math.max(...Array.from(deps, level)) + 1 : 0; levels.set(i, value); return value; }
+  cells.forEach(c => { c.level = level(c.component); c.cycle = components[c.component].length > 1 || c.deps.includes(c.s.key); });
+  const owners = [...new Set(cells.map(c => c.owner))], order = (S.agents || []).map(a => a.id);
+  owners.sort((a, b) => (a ? (order.indexOf(a) < 0 ? order.length : order.indexOf(a)) : order.length + 1) - (b ? (order.indexOf(b) < 0 ? order.length : order.indexOf(b)) : order.length + 1));
+  let y = 28;
+  const lanes = owners.map(owner => {
+    const members = cells.filter(c => c.owner === owner), slots = new Map(), row = { owner, y, cells: members };
+    members.forEach(c => { const slot = slots.get(c.level) || 0; slots.set(c.level, slot + 1); c.x = 192 + c.level * 238; c.y = y + 32 + slot * 108; });
+    row.h = Math.max(...slots.values()) * 108 + 16; row.running = members.filter(c => c.running).length; y += row.h + 10; return row;
+  });
+  const columns = Math.max(1, ...cells.map(c => c.level + 1));
+  return { cells, byKey, lanes, columns, w: 168 + columns * 238, h: y + 4, done: cells.filter(c => c.s.status === 'done').length, reworks: cells.reduce((n, c) => n + (c.tl.reworks || 0), 0), running: cells.filter(c => c.running).length };
+}
+function devLaneEdges(data, uid) {
+  const arrow = `${uid}-arrow`, red = `${uid}-red`, handoff = `${uid}-handoff`;
+  let html = `<defs><marker id="${arrow}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10Z" fill="var(--muted)"/></marker><marker id="${red}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="var(--bad)"/></marker><marker id="${handoff}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10Z" fill="var(--faint)"/></marker></defs>`;
+  for (const c of data.cells) {
+    for (const key of c.deps) {
+      const from = data.byKey.get(key), a = { x: from.x + 190, y: from.y + 38 }, b = { x: c.x, y: c.y + 38 };
+      // 同列的环依赖绕过卡片上方，仍然保留真实依赖方向。
+      const d = from.level < c.level ? curve(a, b) : `M${a.x},${a.y} C${a.x + 25},${a.y} ${a.x + 25},${from.y - 18} ${a.x},${from.y - 18} L${b.x - 16},${from.y - 18} C${b.x - 30},${from.y - 18} ${b.x - 30},${b.y} ${b.x},${b.y}`;
+      html += `<path class="dev-dep ${from.s.status !== 'done' ? 'pending' : ''} ${c.running ? 'live' : ''}" d="${d}" marker-end="url(#${arrow})"><title>${esc(shortKey(key) + ' → ' + shortKey(c.s.key))}</title></path>`;
+    }
+    if (c.tl.reworks) {
+      const x = c.x, y = c.y;
+      html += `<path class="dev-rework" d="M${x + 180},${y + 3} C${x + 210},${y - 23} ${x - 20},${y - 23} ${x + 10},${y + 3}" marker-end="url(#${red})"/><text class="dev-rework-label" x="${x + 95}" y="${y - 12}" text-anchor="middle">↺ ${c.tl.reworks}</text>`;
+    }
+    const impls = (c.tl.events || []).filter(e => e.type === 'impl' && e.agent).slice().sort((a, b) => String(a.t || '').localeCompare(String(b.t || ''))), transfers = new Map();
+    for (let i = 1; i < impls.length; i++) if (impls[i - 1].agent !== impls[i].agent) transfers.set(impls[i - 1].agent + '|' + impls[i].agent, { from: impls[i - 1].agent, to: impls[i].agent });
+    for (const transfer of transfers.values()) {
+      const lane = data.lanes.find(l => l.owner === transfer.from); if (transfer.from === c.owner) continue;
+      // 历任负责人没有当前 Story 时不额外创建空泳道，从边缘标注历史来源。
+      const a = { x: 178, y: lane ? lane.y + lane.h / 2 : 16 }, b = { x: c.x, y: c.y + 57 }, tip = `从 ${agentName(transfer.from)} 转给 ${agentName(transfer.to)}${transfer.to !== c.owner ? '；当前负责人 ' + agentName(c.owner) : ''}`;
+      html += `<path class="dev-handoff" d="${curve(a, b)}" marker-end="url(#${handoff})"><title>${esc(tip)}</title></path>`;
+    }
+  }
+  return html;
+}
+function setDevHTML(el, html) { if (el._html !== html) { el.innerHTML = html; el._html = html; } }
+function positionDevLanes() {
+  const layer = $('devLanes'); if (!layer) return;
+  for (const group of layer.children) { const n = nodeById(group.dataset.dev); if (!n) continue; const height = graphNodeHeight(n), panel = group.querySelector('.dev-lanes'); panel.style.left = n.x + 'px'; panel.style.top = (n.y + height + 42) + 'px'; setDevHTML(group.querySelector('.dev-connector'), `<path d="M${n.x + 115},${n.y + height} V${n.y + height + 42}"/>`); }
+}
+function drawDevLanes() {
+  const layer = $('devLanes'); if (!layer) return;
+  const nodes = W.graph.nodes.filter(n => n.type === 'dev' && devIsOpen(n.id) && S.stories.length), ids = new Set(nodes.map(n => n.id));
+  for (const el of Array.from(layer.children)) if (!ids.has(el.dataset.dev)) el.remove();
+  if (selStory && (!storyKeyFor(selStory) || !nodes.length)) { selStory = null; renderSide(); }
+  if (!nodes.length) return;
+  const data = devLaneData();
+  for (const n of nodes) {
+    let group = Array.from(layer.children).find(el => el.dataset.dev === n.id);
+    if (!group) {
+      group = document.createElement('div'); group.dataset.dev = n.id; group.dataset.uid = 'devlane-' + ++devSerial;
+      const seen = S.project + '|' + n.id, fresh = !DEV_SEEN.has(seen); DEV_SEEN.add(seen);
+      group.innerHTML = `<svg class="dev-connector" width="1" height="1" aria-hidden="true"></svg><section class="dev-lanes ${fresh ? 'fresh' : ''}" aria-label="开发看板 · 泳道"><div class="dev-lanes-head"></div><div class="dev-lanes-body"><div class="dev-lane-rows"></div><svg class="dev-lane-svg"></svg><div class="dev-story-cards"></div></div></section>`;
+      layer.appendChild(group); const panel = group.querySelector('.dev-lanes'); panel.addEventListener('animationend', e => { if (e.target === panel) panel.classList.remove('fresh'); });
+    }
+    const panel = group.querySelector('.dev-lanes'), body = group.querySelector('.dev-lanes-body'); panel.style.width = data.w + 'px'; body.style.height = data.h + 'px';
+    setDevHTML(group.querySelector('.dev-lanes-head'), `<b>开发看板 · 泳道</b><span class="grow"></span><span class="small muted">完成 ${data.done}/${data.cells.length} · <span style="color:${data.reworks ? 'var(--bad)' : 'inherit'}">↺ ${data.reworks}</span> · 在跑 ${data.running}</span>`);
+    setDevHTML(group.querySelector('.dev-lane-rows'), Array.from({ length: data.columns }, (_, i) => `<div class="dev-level" style="left:${192 + i * 238}px">依赖层 ${i}</div>`).join('') + data.lanes.map(l => {
+      const a = S.agents.find(a => a.id === l.owner);
+      return `<div class="dev-lane" data-owner="${esc(l.owner)}" style="top:${l.y}px;height:${l.h}px;--c:${color(l.owner || 'muted')}"><div class="dev-lane-label"><span class="dev-lane-name">${esc(agentName(l.owner))}</span><span class="dev-lane-model" title="${esc(a?.effectiveModel || '默认模型')}">${esc(l.owner ? a?.effectiveModel || '默认模型' : '等待分配')}</span><span class="dev-lane-running">${l.cells.length} Story · ${l.running} 在跑</span></div></div>`;
+    }).join(''));
+    setDevHTML(group.querySelector('.dev-lane-svg'), devLaneEdges(data, group.dataset.uid));
+    const cards = group.querySelector('.dev-story-cards'), old = new Map(Array.from(cards.children).map(el => [el.dataset.story, el]));
+    for (const c of data.cells) {
+      let el = old.get(c.s.key); old.delete(c.s.key);
+      if (!el) { el = document.createElement('button'); el.type = 'button'; el.dataset.story = c.s.key; el.draggable = false; el.onclick = () => selectDevStory(c.s.key); cards.appendChild(el); }
+      el.className = `dev-story ${c.running ? 'running' : ''} ${selStory === c.s.key ? 'sel' : ''}`; el.style.left = c.x + 'px'; el.style.top = c.y + 'px'; el.style.setProperty('--c', color(c.owner || 'muted')); el.setAttribute('aria-pressed', String(selStory === c.s.key));
+      el.title = `${c.s.title}\n负责人：${agentName(c.owner)}\n依赖：${c.refs.map(k => shortKey(k) + (!storyKeyFor(k) ? '（缺失）' : '')).join('、') || '无'}${c.cycle ? '\n存在循环依赖，已合并到同一层' : ''}`;
+      setDevHTML(el, `<span class="dev-story-top"><span class="dev-story-lamp ${esc(c.s.status)}" title="${esc(Object.fromEntries(COLS)[c.s.status] || c.s.status)}"></span><span class="dev-story-num">${esc(c.s.epic + '.' + c.s.n)}</span>${c.tl.reworks ? `<span class="dev-story-rework">↺ ${c.tl.reworks}</span>` : ''}<span class="dev-story-skills" title="携带 ${c.skills.list.length} 个技能">🧩 ${c.skills.list.length}</span></span><span class="dev-story-title">${esc(c.s.title)}</span>`);
+    }
+    old.forEach(el => el.remove());
+  }
+  positionDevLanes();
+}
+window.toggleDevLanes = id => {
+  if (!S.stories.length) return;
+  const open = devOpen(); open[id] = !open[id]; localStorage.setItem('devLanes:' + S.project, JSON.stringify(open));
+  drawNodes(); if (!open[id]) renderSide(); else fitView();
+};
+window.selectDevStory = key => { selStory = key; sel = null; selEdge = null; drawNodes(); drawEdges(); renderSide(); };
+window.closeDevStory = () => { selStory = null; drawNodes(); renderSide(); };
 function drawNodes() {
   const box = $('nodes'); if (!box) return;
   box.innerHTML = W.graph.nodes.map(n => {
@@ -647,7 +821,7 @@ function drawNodes() {
       body = `<div class="ln" style="color:${color(aid)}">● ${esc(nodeAgentLabel(n))}</div>
         <div class="row" style="gap:4px">${c.preset ? `<span class="chip">${esc(PRESETS[c.preset])}</span>` : ''}${(c.skills || []).length ? `<span class="chip">🧩 ${c.skills.length}</span>` : ''}${c.approval ? '<span class="chip">需确认</span>' : ''}</div>`;
     }
-    if (n.type === 'dev') { const rw = tlReworks(), rwN = tlList().filter(x => x.reworks).length; body = `<div class="ln">${s.progress ? `${s.progress.done}/${s.progress.total} 个 Story 完成` : '等拆分'}</div>${rw ? `<div class="ln" style="color:var(--bad)">↺ 返工 ${rw} 次 · 涉及 ${rwN} 个 Story</div>` : ''}`; }
+    if (n.type === 'dev') { const rw = tlReworks(), rwN = tlList().filter(x => x.reworks).length; body = `<div class="ln">${S.stories.length ? `${S.stories.filter(x => x.status === 'done').length}/${S.stories.length} 个 Story 完成` : '等拆分 Story'}</div>${rw ? `<div class="ln" style="color:var(--bad)">↺ 返工 ${rw} 次 · 涉及 ${rwN} 个 Story</div>` : ''}<button class="dev-lanes-toggle" data-dev-toggle="${esc(n.id)}" aria-expanded="${devIsOpen(n.id)}" ${S.stories.length ? '' : 'disabled'} title="${S.stories.length ? '按负责人和依赖层级显示 Story' : '等拆分 Story'}" onclick="toggleDevLanes(this.dataset.devToggle)">${devIsOpen(n.id) ? '▾ 收起' : '▸ 展开泳道'}</button>`; }
     if (n.type === 'human') body = `<div class="ln">${esc(c.note || '到这里暂停，等你确认')}</div>`;
     if (s.status === 'running') body += `<div class="ln liveline" data-live="${s.runId || ''}">${esc(s.lastLine || '运行中…')}</div>${s.startedAt ? `<div class="ln">已运行 <span data-since="${s.startedAt}"></span></div>` : ''}`;
     if (s.status === 'waiting') body += `<div class="ln" style="color:var(--warn)">${esc(s.note || '点开确认')}</div>`;
@@ -657,7 +831,7 @@ function drawNodes() {
       <div class="nh"><span class="ic">${ti}</span><span class="tt">${esc(n.title || tl)}</span>${s.stale ? '<span class="chip warn" title="上游重新确认过">上游已更新</span>' : ''}<span class="chip ${stc}">${s.status === 'running' ? '<span class="pulse">' + stl + '</span>' : stl}</span></div>
       <div class="nb">${body}</div></div>`;
   }).join('');
-  tick();
+  drawDevLanes(); tick();
 }
 function portPos(id, side) { const n = nodeById(id); return n ? { x: n.x + (side === 'out' ? 230 : 0), y: n.y + 26 } : { x: 0, y: 0 }; }
 const curve = (a, b) => { const dx = Math.max(40, Math.abs(b.x - a.x) / 2); return `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`; };
@@ -674,9 +848,10 @@ function bindCanvas() {
   cv.addEventListener('wheel', e => { e.preventDefault(); const r = cv.getBoundingClientRect(); zoomAt(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.1 : 1 / 1.1); }, { passive: false });
   cv.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
+    if (e.target.closest('.dev-story, button')) { e.stopPropagation(); return; }
     const out = e.target.closest('[data-out]'), nodeEl = e.target.closest('.node'), edge = e.target.closest('[data-edge]');
-    if (out) { drag = { mode: 'link', from: out.dataset.out }; e.stopPropagation(); return; }
-    if (edge) { selEdge = +edge.dataset.edge; sel = null; drawEdges(); drawNodes(); renderSide(); return; }
+    if (out) { if (selStory) { selStory = null; drawNodes(); renderSide(); } drag = { mode: 'link', from: out.dataset.out }; e.stopPropagation(); return; }
+    if (edge) { selEdge = +edge.dataset.edge; sel = null; selStory = null; drawEdges(); drawNodes(); renderSide(); return; }
     if (nodeEl) { const n = nodeById(nodeEl.dataset.id), p = toWorld(e); drag = { mode: 'node', id: n.id, dx: p.x - n.x, dy: p.y - n.y, moved: false }; return; }
     drag = { mode: 'pan', sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y, moved: false }; cv.classList.add('panning');
   });
@@ -684,7 +859,7 @@ function bindCanvas() {
     if (!drag || !$('canvas')) return;
     if (drag.mode === 'pan') { view.x = drag.vx + e.clientX - drag.sx; view.y = drag.vy + e.clientY - drag.sy; drag.moved = true; applyView(); }
     if (drag.mode === 'node') { const n = nodeById(drag.id), p = toWorld(e); n.x = Math.round((p.x - drag.dx) / 10) * 10; n.y = Math.round((p.y - drag.dy) / 10) * 10; drag.moved = true;
-      const el = document.querySelector(`.node[data-id="${n.id}"]`); if (el) { el.style.left = n.x + 'px'; el.style.top = n.y + 'px'; } drawEdges(); }
+      const el = document.querySelector(`.node[data-id="${n.id}"]`); if (el) { el.style.left = n.x + 'px'; el.style.top = n.y + 'px'; } positionDevLanes(); drawEdges(); }
     if (drag.mode === 'link') drawEdges({ a: portPos(drag.from, 'out'), b: toWorld(e) });
   };
   window.onpointerup = e => {
@@ -699,12 +874,13 @@ function bindCanvas() {
       }
       drawEdges();
     }
-    if (d.mode === 'node') { if (d.moved) saveGraph(); else { sel = d.id; selEdge = null; drawNodes(); drawEdges(); renderSide(); } }
-    if (d.mode === 'pan' && !d.moved && (sel || selEdge !== null)) { sel = null; selEdge = null; drawNodes(); drawEdges(); renderSide(); }
+    if (d.mode === 'node') { if (d.moved) saveGraph(); else { sel = d.id; selEdge = null; selStory = null; drawNodes(); drawEdges(); renderSide(); } }
+    if (d.mode === 'pan' && !d.moved && (sel || selEdge !== null || selStory)) { sel = null; selEdge = null; selStory = null; drawNodes(); drawEdges(); renderSide(); }
   };
   window.onkeydown = e => {
     if (page !== 'workflow' || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || $('dlg').open) return;
     if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (selStory) { e.preventDefault(); return; }
       if (selEdge !== null) { W.graph.edges.splice(selEdge, 1); selEdge = null; saveGraph(); drawEdges(); }
       else if (sel) deleteNode(sel);
     }
@@ -731,7 +907,7 @@ function addNode(type, preset, label) {
   if (type === 'agent') n.config = { agent: 'leader', preset: preset || '', skills: [], approval: !!preset, prompt: '' };
   if (type === 'dev') n.config = { autoPlan: true };
   if (type === 'human') n.config = { note: '' };
-  W.graph.nodes.push(n); sel = id; selEdge = null; saveGraph(); drawNodes(); drawEdges(); renderSide();
+  W.graph.nodes.push(n); sel = id; selEdge = null; selStory = null; saveGraph(); drawNodes(); drawEdges(); renderSide();
 }
 function deleteNode(id) {
   if (!confirm('删除这个节点？')) return;
@@ -741,8 +917,27 @@ function deleteNode(id) {
 window.deleteNode = deleteNode;
 
 // ---- 右侧节点面板 ----
+function renderDevStorySide(box) {
+  const c = devLaneData().byKey.get(selStory); if (!c) { selStory = null; box.innerHTML = ''; box._html = null; return; }
+  const s = c.s, status = Object.fromEntries(COLS)[s.status] || s.status, impl = [...(S.runs || []).filter(r => r.kind === 'implement' && storyKeyFor(r.storyKey) === s.key), ...(c.tl.events || []).filter(e => e.type === 'impl' && e.run).map(e => ({ id: e.run, createdAt: e.t }))].sort((a, b) => String(b.createdAt || b.startedAt || '').localeCompare(String(a.createdAt || a.startedAt || '')))[0];
+  const side = box.querySelector('.side'), scroll = side?.scrollTop || 0, same = box.dataset.story === s.key; box.dataset.story = s.key;
+  setDevHTML(box, `<div class="side dev-story-side"><div class="sh"><span class="dev-story-num">${esc(s.epic + '.' + s.n)}</span><b class="grow">Story 详情</b><button class="ghost" onclick="closeDevStory()" title="关闭 Story 详情">✕</button></div><div class="sb">
+    <b>${esc(s.title)}</b><div class="row"><span class="chip ${s.status === 'done' ? 'ok' : s.status === 'review' ? 'warn' : c.running ? 'run' : ''}">${esc(status)}</span>${c.running ? '<span class="chip run">● 运行中</span>' : ''}${c.tl.reworks ? `<span class="chip bad">↺ ${c.tl.reworks} 次返工</span>` : ''}</div>
+    <div class="field"><span>负责人</span><b style="color:${color(c.owner || 'muted')}">${esc(agentName(c.owner))}</b><div class="small muted">${esc(S.agents.find(a => a.id === c.owner)?.effectiveModel || (c.owner ? '默认模型' : '等待分配'))}</div></div>
+    <div class="field"><span>依赖</span><div class="row">${c.refs.map(k => { const dep = storyKeyFor(k); return dep ? `<button class="link dev-side-dep" data-story="${esc(dep)}" title="${esc(S.stories.find(s => s.key === dep)?.title)}">${esc(shortKey(dep))} · ${esc(Object.fromEntries(COLS)[S.stories.find(s => s.key === dep)?.status] || '')}</button>` : `<span class="chip warn">${esc(k)}（缺失）</span>`; }).join('') || '<span class="small muted">无前置依赖</span>'}</div>${c.cycle ? '<div class="small" style="color:var(--warn)">存在循环依赖，图中合并到同一依赖层。</div>' : ''}</div>
+    <div class="field"><span>技能 · ${c.skills.list.length}</span>${skillRail('dev|' + S.project + '|' + s.key, c.skills.list, c.running, c.skills.auto) || '<span class="small muted">未携带技能</span>'}</div>
+    ${s.feedback ? `<div class="box" style="color:var(--warn)">打回意见：${esc(s.feedback)}</div>` : ''}
+    <div class="field"><span>事件时间线</span><div class="lane-track">${laneTrack({ ...c.tl, ...s, events: c.tl.events || [] })}</div>${TL === 'unavailable' ? '<span class="small muted">时间线暂不可用</span>' : ''}</div>
+    ${impl ? `<div><button data-impl-log="${esc(impl.id)}">执行日志</button></div>` : '<span class="small muted">暂无实现日志</span>'}
+  </div></div>`);
+  box.querySelectorAll('.dev-side-dep').forEach(el => el.onclick = () => selectDevStory(el.dataset.story));
+  const log = box.querySelector('[data-impl-log]'); if (log) log.onclick = () => openLog(log.dataset.implLog);
+  if (same) box.querySelector('.side').scrollTop = scroll;
+}
 function renderSide() {
   const box = $('side'); if (!box) return;
+  if (selStory) return renderDevStorySide(box);
+  box._html = null; delete box.dataset.story;
   const n = sel && nodeById(sel);
   if (!n) { box.innerHTML = ''; return; }
   const c = n.config || {}, [tl, ti] = TYPES[n.type];
@@ -886,8 +1081,8 @@ function liveBlock(r) {
     <div class="liveline" data-live="${r.id}">${esc(r.lastLine || '等待输出…')}</div>${r.status === 'running' ? `<div class="small muted" data-ago="${r.lastOutputAt || r.startedAt || ''}"></div>` : ''}</div>`;
 }
 const lastRun = (key, kind) => S.runs.find(r => r.storyKey === key && (!kind || r.kind === kind));
-const planFor = key => S.plan && (S.plan.assignments || []).find(a => a.key === key);
-const pendingDeps = key => { const p = planFor(key); return p && p.depends_on ? p.depends_on.filter(k => (S.stories.find(s => s.key === k) || {}).status !== 'done') : []; };
+const planFor = key => S.plan && ((S.plan.assignments || []).find(a => a.key === key) || (S.plan.assignments || []).find(a => storyAlias(a.key) === storyAlias(key)));
+const pendingDeps = key => { const p = planFor(key); return p && p.depends_on ? p.depends_on.filter(k => (S.stories.find(s => s.key === storyKeyFor(k)) || {}).status !== 'done') : []; };
 // 技能条：第一次出现的技能逐个“装入”（跨重绘保持进度，不会重播）；live = 正在用这些技能干活
 const SK_SEEN = new Map();
 const skName = id => String(id).replace(/^[\w-]+:/, '');
