@@ -1,0 +1,59 @@
+{
+  "providers": [
+    {
+      "id": "anthropic",
+      "name": "Anthropic 官方",
+      "type": "anthropic",
+      "baseUrl": "https://api.anthropic.com",
+      "keyEnv": "PROVIDER_ANTHROPIC_KEY",
+      "models": [],
+      "modelsAt": null,
+      "enabled": true,
+      "builtin": true
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI 官方",
+      "type": "openai",
+      "baseUrl": "https://api.openai.com/v1",
+      "keyEnv": "PROVIDER_OPENAI_KEY",
+      "models": [],
+      "modelsAt": null,
+      "enabled": true,
+      "builtin": true
+    },
+    {
+      "id": "gemini",
+      "name": "Google Gemini",
+      "type": "gemini",
+      "baseUrl": "https://generativelanguage.googleapis.com",
+      "keyEnv": "PROVIDER_GEMINI_KEY",
+      "models": [],
+      "modelsAt": null,
+      "enabled": true,
+      "builtin": true
+    },
+    {
+      "id": "xai",
+      "name": "xAI",
+      "type": "xai",
+      "baseUrl": "https://api.x.ai/v1",
+      "keyEnv": "PROVIDER_XAI_KEY",
+      "models": [],
+      "modelsAt": null,
+      "enabled": true,
+      "builtin": true
+    },
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "type": "openai",
+      "baseUrl": "https://api.deepseek.com",
+      "keyEnv": "PROVIDER_DEEPSEEK_KEY",
+      "models": [],
+      "modelsAt": null,
+      "enabled": true,
+      "builtin": true
+    }
+  ]
+}

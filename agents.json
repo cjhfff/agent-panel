@@ -26,8 +26,13 @@
         }
       },
       "modelFlag": "--model",
-      "model": "",
-      "strengths": "架构设计、复杂推理、代码评审、拆解规划"
+      "strengths": "架构设计、复杂推理、代码评审、拆解规划",
+      "auth": {
+        "mode": "official",
+        "provider": "",
+        "model": ""
+      },
+      "loginCmd": "claude"
     },
     {
       "id": "codex",
@@ -56,12 +61,14 @@
           ]
         }
       },
-      "env": {
-        "CODEX_HOME": "{here}/codex-home"
+      "strengths": "按规格实现、改代码、补单元测试",
+      "auth": {
+        "mode": "official",
+        "provider": "",
+        "model": ""
       },
-      "envFile": "secrets.env",
-      "homeConfig": "codex-home/config.toml",
-      "strengths": "按规格实现、改代码、补单元测试"
+      "loginCmd": "codex login",
+      "modelFlag": "-m"
     },
     {
       "id": "gemini",
@@ -88,8 +95,13 @@
         }
       },
       "modelFlag": "-m",
-      "model": "",
-      "strengths": "超长上下文、通读文档与数据手册、调研"
+      "strengths": "超长上下文、通读文档与数据手册、调研",
+      "auth": {
+        "mode": "official",
+        "provider": "",
+        "model": ""
+      },
+      "loginCmd": null
     },
     {
       "id": "grok",
@@ -121,13 +133,14 @@
           ]
         }
       },
-      "env": {
-        "GROK_HOME": "{here}/grok-home"
-      },
-      "envFile": "secrets.env",
-      "homeConfig": "grok-home/config.toml",
       "strengths": "快速实现、脚本与工具类代码",
-      "stream": "grok-ndjson"
+      "stream": "grok-ndjson",
+      "auth": {
+        "mode": "official",
+        "provider": "",
+        "model": ""
+      },
+      "loginCmd": "grok login"
     },
     {
       "id": "deepseek",
@@ -152,7 +165,13 @@
           }
         }
       },
-      "strengths": "低成本批量任务、中文文档、简单模块"
+      "strengths": "低成本批量任务、中文文档、简单模块",
+      "auth": {
+        "mode": "official",
+        "provider": "",
+        "model": ""
+      },
+      "loginCmd": null
     }
   ]
 }

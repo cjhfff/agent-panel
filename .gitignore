@@ -7,4 +7,6 @@ codex-home/*
 !codex-home/config.toml
 grok-home/*
 !grok-home/config.toml
+claude-home/*
+!claude-home/settings.json
 node_modules/

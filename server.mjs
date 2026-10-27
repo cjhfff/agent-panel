@@ -1,4 +1,4 @@
-// Agent 统筹面板 v2：零依赖 Node 服务。
+// Agent 统筹面板 v2：Node 服务，可选 PTY 与本地 xterm.js 终端。
 // - BMAD 的 sprint-status.yaml 是 Story 状态的唯一来源
 // - 面板数据（leader、分配、阶段、运行记录）存在 <项目>/_bmad-output/panel/state.json
 // - 每次运行的文件在 <项目>/_bmad-output/panel/runs/<runId>/
@@ -6,10 +6,14 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import { stripVTControlCharacters } from 'node:util';
+import { createHash } from 'node:crypto';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CONFIG_FILE = path.join(HERE, 'panel.config.json');
+const CONFIG_FILE = process.env.PANEL_CONFIG ? path.resolve(process.env.PANEL_CONFIG) : path.join(HERE, 'panel.config.json');
 const AGENTS_FILE = path.join(HERE, 'agents.json');
 const UI_CHECK = path.join(HERE, 'tools', 'ui-check.mjs').replace(/\\/g, '/');
 const SECRETS_FILE = path.join(HERE, 'secrets.env');
@@ -28,12 +32,26 @@ const readJson = (f, d) => {
     return JSON.parse(txt);
   } catch { return d; }
 };
+function isBrokenText(value) {
+  if (typeof value !== 'string') return false;
+  const compact = value.replace(/\s/gu, ''), questions = (compact.match(/\?/g) || []).length;
+  return /\?{3,}/.test(value) || (questions > 0 && questions / Array.from(compact).length >= 0.2);
+}
+function hasBrokenEncoding(value) {
+  if (typeof value === 'string') return isBrokenText(value);
+  return !!value && typeof value === 'object' && Object.values(value).some(hasBrokenEncoding);
+}
 const writeJson = (f, v) => { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(v, null, 2) + '\n'); };
+// Windows PowerShell 5.1 用 BOM 识别 UTF-8；面板读取 Markdown 时不保留 BOM。
+const readMd = f => fs.readFileSync(f, 'utf8').replace(/^\uFEFF+/, '');
+const writeMd = (f, text) => fs.writeFileSync(f, '\uFEFF' + text.replace(/^\uFEFF+/, ''), 'utf8');
 const now = () => new Date().toISOString();
 const bmadDate = () => { const d = new Date(), p = n => String(n).padStart(2, '0'); return `${p(d.getMonth() + 1)}-${p(d.getDate())}-${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`; };
 const exists = f => { try { fs.accessSync(f); return true; } catch { return false; } };
 const isDir = f => { try { return fs.statSync(f).isDirectory(); } catch { return false; } };
-const stripAnsi = s => s.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '');
+// Node 22's VT stripper can leave parts of OSC titles; remove control strings
+// first, including an unfinished title in a live status preview.
+const stripAnsi = s => stripVTControlCharacters(s.replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\|$)/g, '').replace(/\x1b[P^_X][\s\S]*?(?:\x1b\\|$)/g, ''));
 const slug = s => String(s).trim().replace(/[\\/:*?"<>|\s]+/g, '-').replace(/^-+|-+$/g, '') || 'project';
 
 let config = Object.assign({ project: null, recent: [], projectsRoot: path.join(HERE, 'projects'), maxParallel: 1 }, readJson(CONFIG_FILE, {}));
@@ -44,7 +62,17 @@ function useProject(dir) {
   saveConfig();
 }
 
-// ---------- agent 配置 ----------
+// ---------- agent 配置 / 认证与服务商 ----------
+const PROVIDERS_FILE = path.join(HERE, 'providers.json');
+const AUTH_HOME = process.env.USERPROFILE || process.env.HOME || '';
+const BUILTIN_PROVIDERS = [
+  ['anthropic', 'Anthropic 官方', 'anthropic', 'https://api.anthropic.com'],
+  ['openai', 'OpenAI 官方', 'openai', 'https://api.openai.com/v1'],
+  ['gemini', 'Google Gemini', 'gemini', 'https://generativelanguage.googleapis.com'],
+  ['xai', 'xAI', 'xai', 'https://api.x.ai/v1'],
+  ['deepseek', 'DeepSeek', 'openai', 'https://api.deepseek.com'],
+].map(([id, name, type, baseUrl]) => ({ id, name, type, baseUrl, keyEnv: `PROVIDER_${id.toUpperCase()}_KEY`, models: [], modelsAt: null, enabled: true, builtin: true }));
+const PROVIDER_TYPES = { claude: ['anthropic'], codex: ['openai'], gemini: ['gemini'], grok: ['openai', 'xai'], deepseek: [] };
 function resolveCmd(cmd) {
   if (!cmd) return null;
   if (path.isAbsolute(cmd)) return exists(cmd) ? cmd : null;
@@ -55,17 +83,68 @@ function resolveCmd(cmd) {
   return null;
 }
 const readAgentsFile = () => readJson(AGENTS_FILE, { agents: [] });
-function homeModel(a) {
-  if (!a.homeConfig) return null;
-  const f = path.join(HERE, a.homeConfig);
-  if (!exists(f)) return null;
-  const m = fs.readFileSync(f, 'utf8').match(/^model\s*=\s*"([^"]*)"/m);
-  return m ? m[1] : null;
+const readProvidersFile = () => readJson(PROVIDERS_FILE, { providers: [] });
+// Only inspect the active TOML provider. Other provider tables and project trust remain intact.
+function tomlParts(text) {
+  const parts = [{ header: '', lines: [] }];
+  for (const line of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+    const m = line.match(/^\s*\[([^\r\n]+)\]\s*(?:#.*)?$/);
+    if (m) parts.push({ header: m[1].trim(), lines: [] });
+    else parts.at(-1).lines.push(line);
+  }
+  return parts;
+}
+function tomlValue(part, key) {
+  const line = part?.lines.find(l => new RegExp(`^\\s*${key}\\s*=`).test(l));
+  if (!line) return '';
+  const value = line.slice(line.indexOf('=') + 1).trim();
+  if (value.startsWith('"')) { const m = value.match(/^"(?:\\.|[^"\\])*"/); if (m) { try { return JSON.parse(m[0]); } catch {} } }
+  return (value.match(/^'([^']*)'/) || [])[1] || '';
+}
+const tableId = header => header.replace(/\.(?:"([^"\\]+)"|'([^']+)')/g, (_, a, b) => '.' + (a || b));
+function legacyHome(a) {
+  if (!a.homeConfig || !exists(path.join(HERE, a.homeConfig))) return null;
+  const parts = tomlParts(fs.readFileSync(path.join(HERE, a.homeConfig), 'utf8'));
+  const grok = a.id === 'grok';
+  const active = grok ? tomlValue(parts.find(p => p.header === 'models'), 'default') : tomlValue(parts[0], 'model_provider');
+  const section = parts.find(p => tableId(p.header) === `${grok ? 'model' : 'model_providers'}.${active}`);
+  if (!section) return null;
+  return { baseUrl: tomlValue(section, 'base_url'), envKey: tomlValue(section, 'env_key'), name: tomlValue(section, 'name') || a.name, model: tomlValue(grok ? section : parts[0], 'model') };
+}
+function homeModel(a) { return legacyHome(a)?.model || ''; }
+function homeRelay(a) { return legacyHome(a); }
+function ensureAuthData() {
+  const first = !exists(PROVIDERS_FILE), file = first ? { providers: BUILTIN_PROVIDERS.map(p => ({ ...p })) } : readProvidersFile();
+  const agents = readAgentsFile(); let changed = first, agentChanged = false;
+  for (const a of agents.agents || []) {
+    if (a.auth) continue;
+    const old = legacyHome(a);
+    if (old?.baseUrl && old.envKey) {
+      let provider = file.providers.find(p => p.baseUrl === old.baseUrl && p.keyEnv === old.envKey);
+      if (!provider) {
+        const baseId = `legacy-${a.id}`; let id = baseId, n = 2;
+        while (file.providers.some(p => p.id === id)) id = `${baseId}-${n++}`;
+        provider = { id, name: old.name, type: 'openai', baseUrl: old.baseUrl, keyEnv: old.envKey, models: [], modelsAt: null, enabled: true, builtin: false };
+        file.providers.push(provider); changed = true;
+      }
+      a.auth = { mode: 'provider', provider: provider.id, model: old.model || a.model || '' };
+    } else a.auth = { mode: 'official', provider: '', model: a.model || '' };
+    agentChanged = true;
+  }
+  if (changed) writeJson(PROVIDERS_FILE, file);
+  if (agentChanged) writeJson(AGENTS_FILE, agents);
+}
+function authFor(a) {
+  if (a.auth) return { mode: a.auth.mode, provider: a.auth.provider || '', model: a.auth.model || '' };
+  const old = legacyHome(a), provider = old && readProvidersFile().providers.find(p => p.baseUrl === old.baseUrl && p.keyEnv === old.envKey);
+  return { mode: a.homeConfig ? 'provider' : 'official', provider: provider?.id || '', model: a.homeConfig ? old?.model || '' : a.model || '' };
 }
 function loadAgents() {
   return (readAgentsFile().agents || []).map(a => {
-    const resolved = resolveCmd(a.cmd);
-    return { ...a, resolved, installed: !!resolved, available: !!resolved && a.enabled !== false, effectiveModel: a.homeConfig ? homeModel(a) : (a.model || '') };
+    const resolved = resolveCmd(a.cmd), auth = authFor(a), provider = readProvidersFile().providers.find(p => p.id === auth.provider);
+    let authError = '';
+    try { validateProvider(a, auth); } catch (e) { authError = e.message; }
+    return { ...a, auth, resolved, installed: !!resolved, available: !!resolved && a.enabled !== false && !authError, authError, effectiveModel: auth.model, relay: auth.mode === 'provider' ? provider?.name || '服务商未配置' : '官方账号' };
   });
 }
 function readEnvFile(name) {
@@ -78,24 +157,84 @@ function readEnvFile(name) {
   }
   return out;
 }
-function homeRelay(a) {
-  if (!a.homeConfig) return null;
-  const f = path.join(HERE, a.homeConfig);
-  if (!exists(f)) return null;
-  const t = fs.readFileSync(f, 'utf8');
-  return { baseUrl: (t.match(/^base_url\s*=\s*"([^"]+)"/m) || [])[1], envKey: (t.match(/^env_key\s*=\s*"([^"]+)"/m) || [])[1] };
+function providerKey(p) { return readEnvFile('secrets.env')[p.keyEnv] || ''; }
+function providerDetail(p) {
+  const key = providerKey(p);
+  return { id: p.id, name: p.name, type: p.type, baseUrl: p.baseUrl, keyEnv: p.keyEnv, models: p.models || [], modelsAt: p.modelsAt || null, enabled: p.enabled !== false, builtin: !!p.builtin,
+    keySet: !!key, keyMasked: key ? `已设置 · ****${key.slice(-4)}` : null, check: p.check || null };
+}
+function validateProvider(a, auth) {
+  if (!['official', 'provider'].includes(auth.mode)) throw new Error('认证方式无效');
+  if (auth.mode === 'official') return null;
+  const p = readProvidersFile().providers.find(x => x.id === auth.provider);
+  if (!p) throw new Error('服务商不存在');
+  if (!(PROVIDER_TYPES[a.id] || []).includes(p.type)) throw new Error(a.id === 'deepseek' ? 'DeepSeek Harness 只支持自身配置' : `${a.name} 不兼容 ${p.type} 协议`);
+  if (p.enabled === false) throw new Error('服务商已停用');
+  if (['codex', 'grok'].includes(a.id) && !auth.model.trim()) throw new Error('请填写模型');
+  return p;
+}
+function setTomlValues(part, values) {
+  for (const [key, value] of Object.entries(values)) {
+    const re = new RegExp(`^\\s*${key}\\s*=`), line = `${key} = ${typeof value === 'boolean' ? value : JSON.stringify(value)}`;
+    const index = part.lines.findIndex(l => re.test(l));
+    if (index >= 0) { part.lines[index] = line; part.lines = part.lines.filter((l, i) => i === index || !re.test(l)); }
+    else part.lines.unshift(line);
+  }
+}
+function writeProviderConfig(a, p, model) {
+  const grok = a.id === 'grok', dir = path.join(HERE, grok ? 'grok-home' : 'codex-home'), f = path.join(dir, 'config.toml');
+  const parts = tomlParts(exists(f) ? fs.readFileSync(f, 'utf8') : ''), id = `panel_${p.id.replace(/-/g, '_')}`;
+  let selected;
+  if (grok) {
+    selected = parts.find(x => x.header === 'models');
+    if (!selected) { selected = { header: 'models', lines: [] }; parts.push(selected); }
+  } else selected = parts[0];
+  const old = tomlValue(selected, grok ? 'default' : 'model_provider');
+  setTomlValues(selected, grok ? { default: id } : { model, model_provider: id });
+  const prefix = grok ? 'model' : 'model_providers';
+  const kept = parts.filter(x => ![`${prefix}.${old}`, `${prefix}.${id}`].includes(tableId(x.header)));
+  kept.push({ header: `${prefix}.${id}`, lines: Object.entries(grok
+    ? { model, name: p.name, base_url: p.baseUrl, api_backend: 'responses', env_key: p.keyEnv }
+    : { name: p.name, base_url: p.baseUrl, wire_api: 'responses', env_key: p.keyEnv, requires_openai_auth: false })
+    .map(([k, v]) => `${k} = ${typeof v === 'boolean' ? v : JSON.stringify(v)}`) });
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(f, kept.map(x => (x.header ? `[${x.header}]\n` : '') + x.lines.join('\n').trimEnd()).join('\n\n').trim() + '\n', 'utf8');
+}
+const MANAGED_AUTH_ENV = ['CODEX_HOME', 'GROK_HOME', 'CLAUDE_CONFIG_DIR', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'CLAUDE_CODE_OAUTH_TOKEN', 'OPENAI_API_KEY', 'OPENAI_BASE_URL', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'GOOGLE_GEMINI_BASE_URL', 'GOOGLE_GENAI_USE_VERTEXAI', 'GOOGLE_GENAI_USE_GCA', 'GROK_API_KEY', 'XAI_API_KEY'];
+function invocationEnv(a, perm = {}) {
+  const sub = o => Object.fromEntries(Object.entries(o || {}).map(([k, v]) => [k, String(v).replaceAll('{here}', HERE)]));
+  const env = { ...process.env, ...sub(a.env), ...sub(perm.env) };
+  const managed = new Set([...MANAGED_AUTH_ENV, ...readProvidersFile().providers.map(p => p.keyEnv)].map(k => k.toUpperCase()));
+  // Windows environment names are case-insensitive, including inherited names.
+  for (const k of Object.keys(env)) if (managed.has(k.toUpperCase())) delete env[k];
+  return env;
 }
 function buildInvocation(a, prompt, cwd) {
-  const perm = (a.perm || {})[a.permission || 'max'] || {};
+  const perm = (a.perm || {})[a.permission || 'max'] || {}, auth = authFor(a), p = validateProvider(a, auth);
   const args = [];
   for (const x of a.args) {
     if (x === '{perm}') args.push(...(perm.args || []));
-    else args.push(x.replace('{prompt}', prompt).replace('{cwd}', cwd).replace('{here}', HERE));
+    else args.push(x.replaceAll('{prompt}', prompt).replaceAll('{cwd}', cwd).replaceAll('{here}', HERE));
   }
-  if (a.modelFlag && a.model) args.push(a.modelFlag, a.model);
-  const sub = o => Object.fromEntries(Object.entries(o || {}).map(([k, v]) => [k, String(v).replace('{here}', HERE)]));
-  const env = { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0', ...sub(a.env), ...sub(perm.env), ...readEnvFile(a.envFile) };
-  return { exe: a.resolved, args, env, stream: a.stream || null };
+  if (a.modelFlag && auth.model) args.push(a.modelFlag, auth.model);
+  else if (['codex', 'grok'].includes(a.id) && auth.mode === 'official' && auth.model) args.push('-m', auth.model);
+  const env = invocationEnv(a, perm);
+  if (p) {
+    const key = providerKey(p); if (!key) throw new Error('服务商尚未设置 API Key');
+    env[p.keyEnv] = key;
+    if (a.id === 'claude') {
+      Object.assign(env, { ANTHROPIC_BASE_URL: p.baseUrl, ANTHROPIC_AUTH_TOKEN: key, CLAUDE_CONFIG_DIR: path.join(HERE, 'claude-home') });
+      if (auth.model) env.ANTHROPIC_MODEL = auth.model;
+      fs.mkdirSync(env.CLAUDE_CONFIG_DIR, { recursive: true });
+      const settings = path.join(env.CLAUDE_CONFIG_DIR, 'settings.json');
+      if (!exists(settings)) writeJson(settings, {});
+    } else if (a.id === 'gemini') Object.assign(env, { GEMINI_API_KEY: key, GOOGLE_GEMINI_BASE_URL: p.baseUrl });
+    else if (['codex', 'grok'].includes(a.id)) {
+      writeProviderConfig(a, p, auth.model);
+      env[a.id === 'codex' ? 'CODEX_HOME' : 'GROK_HOME'] = path.join(HERE, `${a.id}-home`);
+    }
+  }
+  return { exe: a.resolved || resolveCmd(a.cmd), args, env, stream: a.stream || null };
 }
 
 // ---------- 项目路径 ----------
@@ -113,14 +252,21 @@ const P = root => {
     runs: path.join(panel, 'runs'),
   };
 };
-const RESULT_NAME = { plan: 'plan.json', review: 'review.json', implement: 'result.json', stage: 'stage.json', node: 'node.json', nodereview: 'review.json', tick: 'tick.json', task: 'result.json', test: 'result.json', setup: 'result.json' };
+const RESULT_NAME = { triage: 'triage.json', plan: 'plan.json', review: 'review.json', implement: 'result.json', stage: 'stage.json', node: 'node.json', nodereview: 'review.json', tick: 'tick.json', task: 'result.json', test: 'result.json', setup: 'result.json' };
 const runDir = (p, id) => path.join(p.runs, id);
 const runFiles = (p, r) => { const d = runDir(p, r.id); return { dir: d, task: path.join(d, 'task.md'), log: path.join(d, 'run.log'), result: path.join(d, RESULT_NAME[r.kind] || 'result.json') }; };
+function readAgentResult(p, run) {
+  if (!run) return null;
+  const result = readJson(runFiles(p, run).result, null);
+  // Keep the original action fields; callers only replace damaged text when displaying it.
+  if (hasBrokenEncoding(result)) run.encodingBroken = true;
+  return result;
+}
 
 // ---------- BMAD 文档解析 ----------
 function parseEpics(file) {
   if (!exists(file)) return { epics: [], stories: [] };
-  const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
+  const lines = readMd(file).split(/\r?\n/);
   const epics = [], stories = [];
   let cur = null, inFence = false;
   for (const line of lines) {
@@ -206,7 +352,7 @@ function stageInfo(p, st) {
     if (running) status = 'running';
     out[s] = { ...rec, status, doc: doc ? path.relative(p.root, doc).replace(/\\/g, '/') : null, runId: running ? running.id : rec.runId };
   }
-  out.requirement = { text: exists(p.requirement) ? fs.readFileSync(p.requirement, 'utf8') : '' };
+  out.requirement = { text: exists(p.requirement) ? readMd(p.requirement) : '' };
   return out;
 }
 
@@ -224,7 +370,7 @@ function normalizePlan(p, plan) {
   };
   return { ...plan, assignments: plan.assignments.map(a => ({ ...a, key: full(a.key), depends_on: (a.depends_on || []).map(full) })) };
 }
-const readPlan = p => normalizePlan(p, readJson(p.plan, null));
+const readPlan = p => { const plan = readJson(p.plan, null); return normalizePlan(p, plan && hasBrokenEncoding(plan) ? { ...plan, encodingBroken: true } : plan); };
 
 // ---------- 面板状态 ----------
 const loadState = p => {
@@ -234,10 +380,10 @@ const loadState = p => {
 const saveState = (p, s) => writeJson(p.state, s);
 const skillsBase = p => exists(path.join(p.root, '.claude', 'skills')) ? '.claude/skills' : '.agents/skills';
 
-function snapshot() {
-  const agents = loadAgents().map(({ resolved, ...a }) => ({ id: a.id, name: a.name, available: a.available, installed: a.installed, enabled: a.enabled !== false, strengths: a.strengths, permission: a.permission, effectiveModel: a.effectiveModel, relay: a.relay }));
-  if (!config.project || !exists(config.project)) return { project: null, recent: config.recent.filter(exists), projectsRoot: config.projectsRoot, agents, maxParallel: config.maxParallel };
-  const p = P(config.project), parsed = parseEpics(p.epics), sprint = readSprint(p.sprint), st = loadState(p);
+function snapshot(project = config.project) {
+  const agents = loadAgents().map(({ resolved, ...a }) => ({ id: a.id, name: a.name, available: a.available, installed: a.installed, enabled: a.enabled !== false, strengths: a.strengths, permission: a.permission, effectiveModel: a.effectiveModel, relay: a.relay, auth: a.auth, authError: a.authError }));
+  if (!project || !exists(project)) return { project: null, recent: config.recent.filter(exists), projectsRoot: config.projectsRoot, agents, maxParallel: config.maxParallel };
+  const p = P(project), parsed = parseEpics(p.epics), sprint = readSprint(p.sprint), st = loadState(p);
   const stories = parsed.stories.map(s => {
     const key = Object.keys(sprint).find(k => k.startsWith(`${s.epic}-${s.n}-`)) || `${s.epic}-${s.n}`;
     return { ...s, key, status: sprint[key] || 'backlog', agent: st.assignments[key] || null, feedback: st.feedback[key] || null };
@@ -248,12 +394,13 @@ function snapshot() {
   return {
     project: p.root, projectName: path.basename(p.root), recent: config.recent.filter(exists), projectsRoot: config.projectsRoot,
     bmadInstalled: exists(path.join(p.root, '_bmad')), hasEpics: exists(p.epics), hasSprint: exists(p.sprint), maxParallel: config.maxParallel,
-    agents, epics: parsed.epics, stories, leader: st.leader, leaderSkills: st.leaderSkills || [], acceptance: st.acceptance || {}, mode: st.mode || 'manual', maxRounds: st.maxRounds || 2, acceptLevel: acceptLevel(st), leaderBoard: (() => { const L = st.leaderBoard || {}; return { notes: L.notes || '', progress: L.progress || null, ask: L.ask || null, finished: L.finished || null, error: L.error || null, ticks: L.ticks || 0, lastTickAt: L.lastTickAt || null, log: (L.log || []).slice(-30).reverse(), answers: L.answers || [] }; })(), autoRounds: st.autoRounds || {}, storySkills: (() => { const out = {}, pl = readPlan(p); for (const x of (pl && pl.assignments) || []) if (x.skills && x.skills.length) out[fullStoryKey(p, x.key)] = [...x.skills]; for (const [k, v] of Object.entries(st.leaderInstr || {})) if (v.skills && v.skills.length) out[k] = [...new Set([...(out[k] || []), ...v.skills])]; return out; })(), storyAutoSkills: Object.fromEntries(Object.entries(st.leaderInstr || {}).map(([k, v]) => [k, v.autoSkills || []])), plan: readPlan(p), stages: stageInfo(p, st),
-    runs: st.runs.slice(-80).reverse().map(r => ({ ...r, lastLine: live.get(r.id) || r.lastLine, lastOutputAt: lastOut.get(r.id) || null })), docs,
+    ...triageSnapshot(p, st), agents, epics: parsed.epics, stories, leader: st.leader, leaderSkills: st.leaderSkills || [], acceptance: st.acceptance || {}, mode: st.mode || 'manual', maxRounds: st.maxRounds || 2, acceptLevel: acceptLevel(st), leaderBoard: (() => { const L = st.leaderBoard || {}; return { notes: L.notes || '', progress: L.progress || null, ask: L.ask || null, finished: L.finished || null, error: L.error || null, ticks: L.ticks || 0, lastTickAt: L.lastTickAt || null, log: (L.log || []).slice(-30).reverse(), answers: L.answers || [] }; })(), autoRounds: st.autoRounds || {}, storySkills: (() => { const out = {}, pl = readPlan(p); for (const x of (pl && pl.assignments) || []) if (x.skills && x.skills.length) out[fullStoryKey(p, x.key)] = [...x.skills]; for (const [k, v] of Object.entries(st.leaderInstr || {})) if (v.skills && v.skills.length) out[k] = [...new Set([...(out[k] || []), ...v.skills])]; return out; })(), storyAutoSkills: Object.fromEntries(Object.entries(st.leaderInstr || {}).map(([k, v]) => [k, v.autoSkills || []])), plan: readPlan(p), stages: stageInfo(p, st),
+    runs: st.runs.slice(-80).reverse().map(r => { if (!r.encodingBroken) readAgentResult(p, r); return { ...r, lastLine: live.get(r.id) || r.lastLine, lastOutputAt: lastOut.get(r.id) || null }; }), docs,
   };
 }
 
 // ---------- 任务文件（命令行只传一句短指令） ----------
+const TEXT_ENCODING_RULE = '- Windows PowerShell 5.1 读写文本文件一律加 `-Encoding UTF8`；中文命令输出先设 `[Console]::OutputEncoding = [Text.Encoding]::UTF8`；管道给原生程序前先设 `$OutputEncoding = [Text.Encoding]::UTF8`。更稳妥：把脚本写成 UTF-8 的 .js / .py 文件再运行，不要用 `内容 | node -` 这种管道方式写含中文的文件。';
 const FORBIDDEN = `
 ## 禁止（违反会被直接取消）
 - 不要启动有界面的程序（浏览器窗口、编辑器等），不要模拟桌面键盘鼠标，不要读写系统剪贴板。
@@ -381,7 +528,7 @@ ${FORBIDDEN}
 `;
 }
 function leaderReviewTask(p, story, run, resultPath) {
-  const res = run && readJson(runFiles(p, run).result, null);
+  const res = readAgentResult(p, run);
   const skillsBlock = skillsPrompt(p, loadState(p).leaderSkills);
   return `# 你的角色：Leader 评审——只读检查，不改代码
 
@@ -460,10 +607,11 @@ function shortCmd(t) {
 }
 function feedStatus(runId, text) {
   const p = parsers.get(runId) || { buf: '', mode: null, expectCmd: false };
-  p.buf += stripAnsi(text).replace(/\r/g, '');
-  const lines = p.buf.split('\n'); p.buf = lines.pop();
+  // Keep incomplete escape sequences until the next chunk before stripping them.
+  p.buf += text;
+  const lines = p.buf.split(/\r\n|\r|\n/); p.buf = lines.pop();
   for (const raw of lines) {
-    const t = raw.trim();
+    const t = stripAnsi(raw).trim();
     if (!t) continue;
     if (/^-{4,}$|^={4,}$|^(OpenAI Codex|workdir|model|provider|approval|sandbox|reasoning|session id)/i.test(t)) continue; // Codex 启动信息
     if (t === 'codex') { p.mode = 'say'; continue; }
@@ -480,7 +628,7 @@ function feedStatus(runId, text) {
   }
   // 不换行的叙述（Grok）：从未完结的缓冲里取最后一句完整的话
   if (p.mode === null && p.buf.length) {
-    const done = p.buf.split(/(?<=[。！？!?])/); done.pop();
+    const done = stripAnsi(p.buf).split(/(?<=[。！？!?])/); done.pop();
     const last = done.map(x => x.trim()).filter(x => x.length > 3).pop();
     if (last) live.set(runId, '💬 ' + last.slice(0, 150));
     if (p.buf.length > 4000) p.buf = p.buf.slice(-2000);
@@ -494,10 +642,12 @@ const quoteWin = a => `"${String(a).replace(/"/g, '""')}"`;
 
 function grokTranslator() {
   let buf = '', inText = false;
+  const decoder = new StringDecoder('utf8');
   const tools = new Map();
-  return chunk => {
-    buf += chunk.toString();
+  const parse = (text, final = false) => {
+    buf += text;
     const lines = buf.split('\n'); buf = lines.pop();
+    if (final && buf) { lines.push(buf); buf = ''; }
     let out = '';
     for (const l of lines) {
       let j; try { j = JSON.parse(l); } catch { if (l.trim()) out += l + '\n'; continue; }
@@ -522,42 +672,104 @@ function grokTranslator() {
     }
     return out;
   };
+  const translate = chunk => parse(decoder.write(chunk));
+  translate.end = () => parse(decoder.end(), true);
+  return translate;
 }
+let ptyModule = null, ptyLoadError = '';
+try { ptyModule = createRequire(import.meta.url)('node-pty'); }
+catch (e) { ptyLoadError = e.message; }
+
 function launch({ exe, args, env, stream }, cwd, logFile, onChunk, onExit, label) {
-  let child;
-  if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(exe)) {
-    child = spawn('cmd.exe', ['/d', '/s', '/c', `"${[exe, ...args].map(quoteWin).join(' ')}"`], { cwd, env, windowsVerbatimArguments: true, windowsHide: true });
-  } else {
-    child = spawn(exe, args, { cwd, env, windowsHide: true });
+  // Open the log before creating a process so an unwritable directory cannot
+  // leave an untracked agent running.
+  const fd = fs.openSync(logFile, 'a');
+  let child, fallback = process.env.PANEL_NO_PTY === '1' ? 'PANEL_NO_PTY=1' : ptyLoadError;
+  try {
+    const batch = process.platform === 'win32' && /\.(cmd|bat)$/i.test(exe);
+    const command = argv => `"${[exe, ...argv].map(quoteWin).join(' ')}"`;
+    const originalArgs = args;
+    if (ptyModule && process.env.PANEL_NO_PTY !== '1') {
+      // Grok calls its native text format "plain" (the default), not "text".
+      // It streams before exit under ConPTY; only the fallback needs NDJSON.
+      if (stream === 'grok-ndjson') args = args.filter((arg, i) => arg !== '--output-format' && args[i - 1] !== '--output-format' && !arg.startsWith('--output-format='));
+      const ptyEnv = { ...env, TERM: 'xterm-256color', COLORTERM: 'truecolor' };
+      for (const k of Object.keys(ptyEnv)) if (/^(NO_COLOR|FORCE_COLOR)$/i.test(k)) delete ptyEnv[k];
+      try {
+        child = ptyModule.spawn(batch ? 'cmd.exe' : exe, batch ? `/d /s /c ${command(args)}` : args, {
+          name: 'xterm-256color', cols: 120, rows: 32, cwd, env: ptyEnv, useConpty: true,
+        });
+        child.pty = true;
+      } catch (e) { fallback = e.message; }
+    }
+    if (!child) {
+      args = originalArgs;
+      const plainEnv = { ...env, NO_COLOR: '1', FORCE_COLOR: '0' };
+      child = batch
+        ? spawn('cmd.exe', ['/d', '/s', '/c', command(args)], { cwd, env: plainEnv, windowsVerbatimArguments: true, windowsHide: true })
+        : spawn(exe, args, { cwd, env: plainEnv, windowsHide: true });
+      child.pty = false;
+    }
+    let logBytes = fs.fstatSync(fd).size, ended = false;
+    // Commit whole UTF-8 strings before broadcasting: /api/log is an exact snapshot
+    // and the browser can trim any overlapping SSE chunks by these byte offsets.
+    const append = text => {
+      if (!text || ended) return;
+      const offset = logBytes, data = Buffer.from(text, 'utf8');
+      fs.writeSync(fd, data); logBytes += data.length;
+      if (onChunk) onChunk(text, { pty: child.pty, offset, endOffset: logBytes });
+    };
+    append(`$ ${label}: ${[path.basename(exe), ...args].join(' ')}\r\n\r\n`);
+    if (!child.pty) append(`[PTY fallback] ${fallback || 'PTY unavailable'}\n`);
+    const finish = code => {
+      if (ended) return;
+      append(`\r\n[exit ${code}]\r\n`);
+      ended = true; fs.closeSync(fd); onExit(code);
+    };
+    if (child.pty) {
+      child.onData(append);
+      child.onExit(({ exitCode }) => finish(exitCode));
+      child.on('error', e => {
+        append(`\r\n[PTY error] ${e.message}\r\n`);
+        killTree(child); finish(1);
+      });
+    } else {
+      const tr = stream === 'grok-ndjson' ? grokTranslator() : null;
+      // stdout/stderr have independent UTF-8 boundaries.
+      const stdoutDecoder = tr ? null : new StringDecoder('utf8'), stderrDecoder = new StringDecoder('utf8');
+      child.stdout.on('data', chunk => append(tr ? tr(chunk) : stdoutDecoder.write(chunk)));
+      child.stderr.on('data', chunk => append(stderrDecoder.write(chunk)));
+      child.stdin.end();
+      child.on('error', e => append(`\n[spawn error] ${e.message}\n`));
+      child.on('close', code => {
+        append(tr ? tr.end() : stdoutDecoder.end()); append(stderrDecoder.end()); finish(code);
+      });
+    }
+    return child;
+  } catch (e) {
+    if (child) killTree(child);
+    try { fs.closeSync(fd); } catch {}
+    throw e;
   }
-  const out = fs.createWriteStream(logFile, { flags: 'a' });
-  out.write(`$ ${label}: ${[path.basename(exe), ...args].join(' ')}\n\n`);
-  const pipe = chunk => { out.write(chunk); onChunk && onChunk(chunk.toString()); };
-  const tr = stream === 'grok-ndjson' ? grokTranslator() : null;
-  child.stdout.on('data', tr ? chunk => { const t = tr(chunk); if (t) pipe(Buffer.from(t)); } : pipe);
-  child.stderr.on('data', pipe);
-  child.stdin.end();
-  child.on('error', e => { out.write(`\n[spawn error] ${e.message}\n`); });
-  child.on('close', code => { out.end(`\n[exit ${code}]\n`); onExit(code); });
-  return child;
 }
-function newRunId(kind, who) { return `${new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14)}-${kind}-${who}`; }
+function newRunId(kind, who) { return `${new Date().toISOString().replace(/[-:T.Z]/g, '')}-${kind}-${who}-${Math.random().toString(36).slice(2, 6)}`; }
 function updateRun(p, id, patch) { const st = loadState(p); const r = st.runs.find(x => x.id === id); if (r) Object.assign(r, patch); saveState(p, st); return r; }
 
-function enqueue({ kind, storyKey = null, stage = null, nodeId = null, agentId, feedback = null, title = null, instructions = null, skills = null, relatedStory = null }) {
-  const p = P(config.project), st = loadState(p), snap = snapshot();
+function enqueue({ project = config.project, kind, storyKey = null, stage = null, nodeId = null, agentId, feedback = null, title = null, instructions = null, skills = null, relatedStory = null }) {
+  const p = P(project), st = loadState(p), snap = snapshot(project);
   const agent = loadAgents().find(a => a.id === agentId);
   if (!agent) throw new Error(`没有这个 agent：${agentId}`);
   if (!agent.installed) throw new Error(`${agent.name} 未安装（找不到 ${agent.cmd}）`);
   if (agent.enabled === false) throw new Error(`${agent.name} 已在设置里停用`);
-  const dup = st.runs.find(r => ['queued', 'running'].includes(r.status) && ((storyKey && r.storyKey === storyKey) || (stage && r.stage === stage) || (nodeId && r.nodeId === nodeId && r.kind === kind) || (kind === 'plan' && r.kind === 'plan') || (kind === 'tick' && r.kind === 'tick')));
+  const dup = st.runs.find(r => !r.cancelRequested && ['queued', 'running'].includes(r.status) && ((storyKey && r.storyKey === storyKey) || (stage && r.stage === stage) || (nodeId && r.nodeId === nodeId && r.kind === kind) || (['plan', 'tick', 'triage'].includes(kind) && r.kind === kind)));
   if (dup) throw new Error('这一项已经在跑或在排队');
   const story = storyKey ? snap.stories.find(s => s.key === storyKey) : null;
   if (storyKey && !story) throw new Error(`找不到 Story ${storyKey}`);
-  const run = { id: newRunId(kind === 'stage' ? stage : kind === 'node' ? 'node' : kind, agentId), kind, storyKey, stage, nodeId, title, relatedStory, agent: agentId, status: 'queued', createdAt: now() };
+  const run = { id: newRunId(kind === 'stage' ? stage : kind === 'node' ? 'node' : kind, agentId), kind, storyKey, stage, nodeId, title, relatedStory, agent: agentId, status: 'queued', pty: false, createdAt: now() };
+  if (kind === 'triage') { run.triageInput = st.triagePending.input; st.triagePending.runId = run.id; }
   const f = runFiles(p, run); fs.mkdirSync(f.dir, { recursive: true });
   const lastImpl = storyKey && [...st.runs].reverse().find(r => r.storyKey === storyKey && r.kind === 'implement');
-  const task = kind === 'plan' ? leaderPlanTask(p, snap, f.result)
+  const task = kind === 'triage' ? triageTask(p, f.result) : kind === 'plan' ? leaderPlanTask(p, snap, f.result)
     : kind === 'review' ? leaderReviewTask(p, story, lastImpl, f.result)
       : kind === 'stage' ? stageTask(p, stage, st, f.result, feedback)
         : kind === 'node' ? nodeTask(p, nodeId, st, f.result, feedback)
@@ -565,7 +777,8 @@ function enqueue({ kind, storyKey = null, stage = null, nodeId = null, agentId, 
             : kind === 'tick' ? leaderBrief(p, f.result)
               : kind === 'task' ? taskTask(p, title, instructions, skills, f.result, relatedStory)
         : memberTask(p, story, f.result);
-  fs.writeFileSync(f.task, task);
+  // 所有任务（包括 Leader 简报/评审）都在此写入，统一带上编码规则。
+  writeMd(f.task, `${task}\n## 通用规则（文本编码）\n${TEXT_ENCODING_RULE}\n`);
   st.runs.push(run);
   if (kind === 'node') { st.wf = st.wf || { nodes: {} }; st.wf.nodes[nodeId] = { ...(st.wf.nodes[nodeId] || {}), status: 'running', runId: run.id, agent: agentId, feedback: feedback || null }; }
   if (kind === 'stage') st.stages[stage] = { ...(st.stages[stage] || {}), status: 'running', agent: agentId, runId: run.id, feedback: feedback || null };
@@ -576,8 +789,8 @@ function enqueue({ kind, storyKey = null, stage = null, nodeId = null, agentId, 
 
 function pump() {
   for (;;) {
-    const busy = [...running.keys()].filter(id => !String(id).includes('-tick-')).length;
-    const idx = queue.findIndex(q => String(q.runId).includes('-tick-') || busy < (config.maxParallel || 1));
+    const busy = [...running.keys()].filter(id => !/-(tick|triage)-/.test(id)).length;
+    const idx = queue.findIndex(q => /-(tick|triage)-/.test(q.runId) || busy < (config.maxParallel || 1));
     if (idx < 0) break;
     const { runId, project } = queue.splice(idx, 1)[0];
     const p = P(project), st = loadState(p), run = st.runs.find(r => r.id === runId);
@@ -590,16 +803,18 @@ function pump() {
       writeJson(path.join(f.dir, 'before.json'), takeSnapshot(p.root));
     }
     const prompt = `Read the task file ${f.task} and follow it exactly. Write your JSON result to the path it specifies.`;
-    const onChunk = text => {
+    const onChunk = (text, meta) => {
       feedStatus(runId, text);
       lastOut.set(runId, now());
-      broadcast('log', { runId, text, lastLine: live.get(runId), lastOutputAt: lastOut.get(runId) });
+      broadcast('log', { runId, text, ...meta, lastLine: live.get(runId), lastOutputAt: lastOut.get(runId) });
     };
     const onExit = code => {
+      clearTimeout(triageTimers.get(runId)); triageTimers.delete(runId);
       running.delete(runId);
-      const result = readJson(f.result, null);
+      const result = readAgentResult(p, run);
       const cur = loadState(p).runs.find(r => r.id === runId) || {};
-      const patch = { status: code === 0 && result ? 'finished' : 'failed', exitCode: code, endedAt: now(), hasResult: !!result, lastLine: live.get(runId) };
+      const patch = { status: code === 0 && result ? 'finished' : 'failed', exitCode: code, endedAt: now(), hasResult: !!result, encodingBroken: hasBrokenEncoding(result), lastLine: live.get(runId) };
+      if (cur.triageTimedOut) { patch.status = 'failed'; patch.error = cur.error; }
       if (run.kind === 'implement') {
         const before = readJson(path.join(f.dir, 'before.json'), {}), after = takeSnapshot(p.root);
         patch.changedFiles = diffSnapshots(before, after);
@@ -620,30 +835,55 @@ function pump() {
         const s2 = loadState(p), node = (readWorkflow(p).nodes || []).find(n => n.id === run.nodeId) || {};
         const ok = !!result && code === 0 && !cur.cancelRequested;
         s2.wf = s2.wf || { nodes: {} };
-        s2.wf.nodes[run.nodeId] = { ...(s2.wf.nodes[run.nodeId] || {}), status: !ok ? 'failed' : (node.config || {}).approval ? (isAuto(s2) && s2.leader ? 'running' : 'waiting') : 'done', note: ok && (node.config || {}).approval && isAuto(s2) ? 'Leader 自动评审中' : null, result: result || null, finishedAt: now() };
-        if (ok && (node.config || {}).approval && isAuto(s2) && s2.leader) needReview = true;
+        const quickReview = isQuickWorkflow(readWorkflow(p)) && run.nodeId === 'review' && automatic(s2);
+        s2.wf.nodes[run.nodeId] = { ...(s2.wf.nodes[run.nodeId] || {}), status: !ok ? 'failed' : quickReview ? 'running' : (node.config || {}).approval ? (isAuto(s2) && s2.leader ? 'running' : 'waiting') : 'done', note: ok && (node.config || {}).approval && isAuto(s2) ? 'Leader 自动评审中' : null, result: result || null, finishedAt: now() };
+        if (ok && !quickReview && (node.config || {}).approval && isAuto(s2) && s2.leader) needReview = true;
         saveState(p, s2);
       }
-      if (patch.status === 'failed' && !result) patch.error = code === 0 ? 'agent 结束但没写结果文件' : `退出码 ${code}`;
+      if (patch.status === 'failed' && !result) patch.error = cur.error || (code === 0 ? 'agent 结束但没写结果文件' : `退出码 ${code}`);
       if (cur.cancelRequested) { patch.status = 'cancelled'; patch.error = '已手动取消'; }
       updateRun(p, runId, patch);
       live.delete(runId); parsers.delete(runId); lastOut.delete(runId);
-      if (needReview) { try { enqueue({ kind: 'nodereview', nodeId: run.nodeId, agentId: loadState(p).leader }); } catch (e) { setNode(p, run.nodeId, { status: 'waiting', note: e.message }); } }
+      if (run.kind === 'triage') {
+        finishTriage(p, run, !cur.cancelRequested && code === 0 ? result : null, cur.cancelRequested ? 'cancelled' : 'Leader 分诊失败');
+        broadcast('state', {}); pump(); return;
+      }
+      if (run.kind === 'node' && run.nodeId === 'review' && isQuickWorkflow(readWorkflow(p)) && automatic(loadState(p)) && !cur.cancelRequested) finishQuickReview(p, code === 0 ? result : null);
+      if (needReview) { try { enqueue({ project: p.root, kind: 'nodereview', nodeId: run.nodeId, agentId: loadState(p).leader }); } catch (e) { setNode(p, run.nodeId, { status: 'waiting', note: e.message }); } }
       try { autoAfterRun(p, run, cur.cancelRequested ? null : result); } catch (e) { console.error('auto:', e.message); }
       try { if (isLeaderMode(loadState(p))) { if (run.kind === 'tick') applyTick(p, run, cur.cancelRequested ? null : result); else scheduleTick(p, `${KIND_CN[run.kind] || run.kind}完成`); } } catch (e) { console.error('leader:', e.message); }
       try { advanceWorkflow(p); autoDispatch(p); } catch (e) { console.error('workflow:', e.message); }
       broadcast('state', {}); pump();
     };
-    running.set(runId, launch(buildInvocation(agent, prompt, p.root), p.root, f.log, onChunk, onExit, agent.name));
+    try {
+      const child = launch(buildInvocation(agent, prompt, p.root), p.root, f.log, onChunk, onExit, agent.name);
+      running.set(runId, child);
+      updateRun(p, runId, { pty: child.pty });
+      if (run.kind === 'triage') triageTimers.set(runId, setTimeout(() => {
+        updateRun(p, runId, { error: 'Leader 分诊超时（3 分钟）', triageTimedOut: true });
+        finishTriage(p, run, null, 'Leader 分诊超时（3 分钟）');
+        killTree(child);
+      }, 3 * 60 * 1000));
+    } catch (e) {
+      updateRun(p, runId, { pty: false, error: e.message });
+      onExit(-1);
+    }
     broadcast('state', {});
   }
 }
 function killTree(child) {
-  if (process.platform === 'win32') execFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], () => {});
+  if (!child?.pid) return;
+  if (process.platform === 'win32') execFile('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true }, () => {});
   else child.kill('SIGTERM');
 }
-function cancel(runId) {
-  const p = P(config.project);
+function activePty(id) {
+  const run = loadState(needProject()).runs.find(r => r.id === id), child = running.get(id);
+  if (!run || run.status !== 'running' || run.cancelRequested || !child?.pty) throw new Error('这个运行没有正在进行的 PTY');
+  return child;
+}
+function cancel(runId, p = P(config.project)) {
+  const st = loadState(p);
+  if (st.triagePending?.runId === runId) { delete st.triagePending; if (st.wf) st.wf.running = false; saveState(p, st); }
   queue = queue.filter(q => q.runId !== runId);
   const child = running.get(runId);
   if (child) { updateRun(p, runId, { cancelRequested: true }); killTree(child); }
@@ -662,11 +902,12 @@ function copyTemplate(name, dir, projectName, overwrite) {
     const rel = path.relative(src, f), dst = path.join(dir, rel);
     if (exists(dst) && !overwrite) continue;
     fs.mkdirSync(path.dirname(dst), { recursive: true });
-    let txt = fs.readFileSync(f, 'utf8').replace(/\{\{PROJECT_NAME\}\}/g, projectName);
-    fs.writeFileSync(dst, txt);
+    const markdown = /\.md$/i.test(f);
+    const txt = (markdown ? readMd(f) : fs.readFileSync(f, 'utf8')).replace(/\{\{PROJECT_NAME\}\}/g, projectName);
+    if (markdown) writeMd(dst, txt); else fs.writeFileSync(dst, txt);
   }
 }
-function setupProject(dir, template, isNew) {
+function setupProject(dir, template, isNew, initial = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const logFile = path.join(HERE, 'logs', `setup-${Date.now()}.log`);
   const job = { dir, status: 'running', logFile, startedAt: now() };
@@ -689,6 +930,13 @@ function setupProject(dir, template, isNew) {
         if (!exists(path.join(dir, '.git'))) execFile('git', ['init', '-q'], { cwd: dir }, () => {});
         fs.mkdirSync(P(dir).panel, { recursive: true });
         useProject(dir);
+        const p = P(dir), st = loadState(p);
+        if (isNew) { st.mode = ['auto', 'leader'].includes(initial.mode) ? initial.mode : 'manual'; saveState(p, st); ensureLeader(p); }
+        if (isNew && String(initial.requirement || '').trim()) {
+          writeMd(p.requirement, String(initial.requirement));
+          const s2 = loadState(p); s2.wf = { nodes: {}, running: automatic(s2) }; saveState(p, s2);
+          requestTriage(p); advanceWorkflow(p);
+        }
       } catch (e) { job.status = 'failed'; job.error = e.message; }
     }
     broadcast('setup', { dir, status: job.status, error: job.error }); broadcast('state', {});
@@ -698,59 +946,222 @@ function setupProject(dir, template, isNew) {
   return job;
 }
 
-// ---------- agent 设置 / 测试 ----------
-function saveAgent(id, patch) {
-  const file = readAgentsFile(), a = file.agents.find(x => x.id === id);
-  if (!a) throw new Error('没有这个 agent');
-  for (const k of ['enabled', 'strengths', 'permission', 'cmd']) if (k in patch) a[k] = patch[k];
-  if ('model' in patch) {
-    if (a.homeConfig) {
-      const f = path.join(HERE, a.homeConfig);
-      const t = fs.readFileSync(f, 'utf8');
-      if (!/^model\s*=/m.test(t)) throw new Error('配置文件里没有 model 行');
-      fs.writeFileSync(f, t.replace(/^model\s*=\s*"[^"]*"/m, `model = "${String(patch.model).replace(/"/g, '')}"`));
-    } else if (a.modelFlag) a.model = patch.model;
-    else throw new Error('这个 agent 不能在面板里改模型');
+// ---------- 服务商 / agent 设置 / 测试 ----------
+function saveProvider(id, patch = {}) {
+  const file = readProvidersFile(); let p = file.providers.find(x => x.id === id);
+  if (id && !p) throw new Error('服务商不存在');
+  const fresh = !p;
+  if (fresh) {
+    id = `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    p = { id, name: '', type: 'openai', baseUrl: '', keyEnv: `PROVIDER_${id.replace(/-/g, '_').toUpperCase()}_KEY`, models: [], modelsAt: null, enabled: true, builtin: false };
   }
-  writeJson(AGENTS_FILE, file);
+  const next = { ...p };
+  for (const k of ['name', 'type', 'baseUrl']) if (k in patch) next[k] = String(patch[k]).trim();
+  if ('enabled' in patch) next.enabled = !!patch.enabled;
+  if (!next.name) throw new Error('服务商名称不能为空');
+  if (!['anthropic', 'openai', 'gemini', 'xai'].includes(next.type)) throw new Error('服务商类型无效');
+  let url; try { url = new URL(next.baseUrl); } catch { throw new Error('Base URL 无效'); }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('Base URL 必须是无凭据、无查询参数的 HTTP(S) 地址');
+  next.baseUrl = next.baseUrl.replace(/\/+$/, '');
+  for (const a of readAgentsFile().agents || []) {
+    const auth = authFor(a);
+    if (auth.mode === 'provider' && auth.provider === id && !(PROVIDER_TYPES[a.id] || []).includes(next.type)) throw new Error(`${a.name} 正在使用此服务商，不能改成不兼容的协议`);
+  }
+  if (p.type !== next.type || p.baseUrl !== next.baseUrl) { next.models = []; next.modelsAt = null; next.check = null; }
+  if (fresh) file.providers.push(next); else Object.assign(p, next);
+  writeJson(PROVIDERS_FILE, file); broadcast('state', {});
+  return providerDetail(next);
+}
+function deleteProvider(id) {
+  const file = readProvidersFile(), p = file.providers.find(x => x.id === id);
+  if (!p) throw new Error('服务商不存在');
+  if (p.builtin) throw new Error('内置服务商不能删除');
+  const users = readAgentsFile().agents.filter(a => { const auth = authFor(a); return auth.mode === 'provider' && auth.provider === id; });
+  if (users.length) throw new Error(`服务商正在被 ${users.map(a => a.name).join('、')} 使用，请先切换认证方式`);
+  file.providers = file.providers.filter(x => x.id !== id); writeJson(PROVIDERS_FILE, file);
+  return { ok: true };
+}
+// Shared secret writer. Neither provider configuration nor API responses contain raw keys.
+function setSecretEnv(keyEnv, value) {
+  value = String(value).trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(keyEnv) || !value || /[\r\n\0]/.test(value)) throw new Error('API Key 无效');
+  const backup = path.join(HERE, 'logs', 'auth', 'secrets.env.bak');
+  fs.mkdirSync(path.dirname(backup), { recursive: true });
+  if (exists(SECRETS_FILE) && !exists(backup)) fs.copyFileSync(SECRETS_FILE, backup);
+  const text = exists(SECRETS_FILE) ? fs.readFileSync(SECRETS_FILE, 'utf8') : '';
+  const re = new RegExp(`^\\s*${keyEnv}\\s*=`); let replaced = false;
+  const lines = text.split(/\r?\n/).filter(line => {
+    if (!re.test(line.replace(/^\uFEFF/, ''))) return true;
+    if (replaced) return false;
+    replaced = true; return true;
+  }).map(line => re.test(line.replace(/^\uFEFF/, '')) ? `${keyEnv}=${value}` : line);
+  if (!replaced) { if (lines.at(-1) === '') lines.pop(); lines.push(`${keyEnv}=${value}`); }
+  fs.writeFileSync(SECRETS_FILE, lines.join('\n').replace(/\n*$/, '') + '\n', 'utf8');
+}
+function setProviderSecret(id, value) {
+  const file = readProvidersFile(), p = file.providers.find(x => x.id === id);
+  if (!p) throw new Error('服务商不存在');
+  setSecretEnv(p.keyEnv, value); p.check = null;
+  writeJson(PROVIDERS_FILE, file); return { ok: true };
 }
 function setSecret(id, value) {
   const a = loadAgents().find(x => x.id === id);
-  const relay = a && homeRelay(a);
-  if (!relay || !relay.envKey) throw new Error('这个 agent 不走中转站 key');
-  const lines = exists(SECRETS_FILE) ? fs.readFileSync(SECRETS_FILE, 'utf8').split(/\r?\n/).filter(l => l && !l.startsWith(relay.envKey + '=')) : [];
-  lines.push(`${relay.envKey}=${String(value).trim()}`);
-  fs.writeFileSync(SECRETS_FILE, lines.join('\n') + '\n');
+  if (!a || a.auth.mode !== 'provider') throw new Error('这个 agent 未使用服务商');
+  return setProviderSecret(a.auth.provider, value);
+}
+function safeProviderError(message, key = '') {
+  let text = String(message || '服务商请求失败');
+  if (key) text = text.split(key).join('[已隐藏]').split(encodeURIComponent(key)).join('[已隐藏]');
+  return text.replace(/([?&]key=)[^\s&"']+/gi, '$1[已隐藏]').replace(/Bearer\s+[^\s"']+/gi, 'Bearer [已隐藏]').slice(0, 350);
+}
+async function checkProvider(id, cache = false) {
+  const p = readProvidersFile().providers.find(x => x.id === id);
+  if (!p) throw new Error('服务商不存在');
+  const key = providerKey(p), at = now(); let result, models = [];
+  try {
+    if (!key) throw new Error('尚未设置 API Key');
+    if (p.enabled === false) throw new Error('服务商已停用');
+    const base = p.baseUrl.replace(/\/+$/, ''), signal = AbortSignal.timeout(15000);
+    const target = p.type === 'anthropic' ? base + (base.endsWith('/v1') ? '/models' : '/v1/models') : p.type === 'gemini' ? base + (base.endsWith('/v1beta') ? '/models' : '/v1beta/models') : base + '/models';
+    const get = async (url, headers) => {
+      const response = await fetch(url, { headers, signal, redirect: 'error' });
+      let json; try { json = await response.json(); } catch { throw new Error(`HTTP ${response.status}：响应不是 JSON`); }
+      return { response, json };
+    };
+    let reply;
+    if (p.type === 'anthropic') {
+      try { reply = await get(target, { 'x-api-key': key, 'anthropic-version': '2023-06-01' }); } catch (e) { if (signal.aborted) throw e; }
+      if (!reply?.response.ok || reply.json?.error) reply = await get(target, { Authorization: `Bearer ${key}`, 'anthropic-version': '2023-06-01' });
+    } else reply = await get(p.type === 'gemini' ? `${target}?key=${encodeURIComponent(key)}` : target, p.type === 'gemini' ? {} : { Authorization: `Bearer ${key}` });
+    const { response, json } = reply;
+    if (!response.ok || json.error) throw new Error(`HTTP ${response.status}：${json.error?.message || json.message || '认证或模型查询失败'}`);
+    const entries = p.type === 'gemini' ? json.models : json.data;
+    if (!Array.isArray(entries)) throw new Error('响应缺少模型列表');
+    models = [...new Set(entries.map(m => p.type === 'gemini' ? String(m.name || '').replace(/^models\//, '') : m.id).filter(m => typeof m === 'string' && m))].sort();
+    result = { ok: true, count: models.length, at };
+  } catch (e) {
+    result = { ok: false, count: 0, at, error: safeProviderError(['TimeoutError', 'AbortError'].includes(e.name) ? '请求超时（15 秒）' : e.message, key) };
+  }
+  // Re-read after network IO: never overwrite concurrent edits or revive a deleted provider.
+  const file = readProvidersFile(), current = file.providers.find(x => x.id === id);
+  if (current && current.baseUrl === p.baseUrl && current.type === p.type && providerKey(current) === key) {
+    current.check = result;
+    if (cache && result.ok) { current.models = models; current.modelsAt = now(); }
+    writeJson(PROVIDERS_FILE, file);
+  }
+  return result;
+}
+async function providerModels(id) {
+  const result = await checkProvider(id, true);
+  if (!result.ok) throw new Error(result.error);
+  const p = readProvidersFile().providers.find(x => x.id === id);
+  if (!p) throw new Error('服务商已删除');
+  return providerDetail(p);
+}
+function saveAgent(id, patch) {
+  const file = readAgentsFile(), a = file.agents.find(x => x.id === id);
+  if (!a) throw new Error('没有这个 agent');
+  const next = { ...a };
+  for (const k of ['enabled', 'strengths', 'permission', 'cmd']) if (k in patch) next[k] = patch[k];
+  if ('permission' in patch && !Object.hasOwn(a.perm || {}, patch.permission)) throw new Error('权限档无效');
+  next.auth = 'auth' in patch ? { mode: patch.auth?.mode, provider: String(patch.auth?.provider || ''), model: String(patch.auth?.model || '').trim() } : authFor(a);
+  if ('model' in patch) next.auth.model = String(patch.model || '').trim();
+  if (next.auth.mode === 'official') next.auth.provider = '';
+  const p = validateProvider(next, next.auth);
+  if (p && ['codex', 'grok'].includes(a.id)) writeProviderConfig(next, p, next.auth.model);
+  Object.assign(a, next); writeJson(AGENTS_FILE, file);
+  broadcast('state', {});
+}
+function loginStatus(a) {
+  const files = { claude: ['.claude', '.credentials.json'], codex: ['.codex', 'auth.json'], gemini: ['.gemini', 'oauth_creds.json'], grok: ['.grok', 'auth.json'] };
+  const hints = { claude: '运行 Claude Code 后输入 /login 完成官方账号登录。', codex: '运行 codex login，按 CLI 提示完成登录。', gemini: '首次运行 gemini 会引导登录；本机未安装，登录命令尚未核实。', grok: '运行 grok login，按 CLI 提示完成登录。', deepseek: '使用 DeepSeek Harness 自身 settings.yaml 配置。' };
+  // Provider tests use separate credentials and cannot verify the official account.
+  const test = latestAgentTest(a, 'official'), hasCredentials = !!files[a.id] && exists(path.join(AUTH_HOME, ...files[a.id]));
+  const status = a.id === 'deepseek' ? 'self' : loginStateFromTest(hasCredentials, test);
+  const verification = status === 'expired' ? '登录已失效，请点击「登录」，完成后重新测连通。' : status === 'unverified' ? (test ? '最近一次测连通未通过，尚未验证登录；请重新测连通。' : '凭据文件存在，尚未测连通验证；请点击「测连通」。') : status === 'logged-in' ? '官方账号最近一次测连通通过。' : '';
+  return { status, hint: [verification, hints[a.id] || '请使用 CLI 自身登录。'].filter(Boolean).join(' '), command: a.loginCmd || '', canLogin: !!a.loginCmd && !!a.installed, testedAt: test?.finishedAt || null };
+}
+function authErrorInOutput(output) { return /not\s+logged\s+in|\/login\b|\b401\b|unauthori[sz]ed|\bexpired\b/i.test(String(output || '')); }
+function loginStateFromTest(hasCredentials, test) {
+  if (!hasCredentials) return 'not-logged-in';
+  if (test?.status === 'ok') return 'logged-in';
+  if (['failed', 'timeout'].includes(test?.status) && (test.authFailed || authErrorInOutput(test.output))) return 'expired';
+  return 'unverified';
+}
+function loginAgent(id) {
+  const a = loadAgents().find(x => x.id === id);
+  if (!a?.installed || !a.loginCmd) throw new Error('该 CLI 没有可用的登录命令，请按提示手动登录');
+  if (a.auth.mode !== 'official') throw new Error('请先保存为官方账号模式');
+  const commands = { claude: { 'claude': [], 'claude auth login': ['auth', 'login'] }, codex: { 'codex login': ['login'] }, gemini: { gemini: [] }, grok: { 'grok login': ['login'] } };
+  const args = commands[a.id]?.[a.loginCmd];
+  if (!args) throw new Error('登录命令未核实');
+  if (process.platform !== 'win32') throw new Error('打开登录控制台仅支持 Windows，请手动运行登录命令');
+  const title = `${a.name.replace(/["%&|<>^!\r\n]/g, '')} 登录`;
+  const command = `start "${title}" cmd /d /k "${[a.resolved, ...args].map(quoteWin).join(' ')}"`;
+  const child = spawn('cmd.exe', ['/d', '/s', '/c', command], { cwd: HERE, env: invocationEnv(a), detached: true, stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: true });
+  child.on('error', () => {}); child.unref();
+  return { ok: true, hint: loginStatus(a).hint };
 }
 function agentDetail(a) {
-  const relay = homeRelay(a), secrets = readEnvFile(a.envFile);
-  const key = relay && relay.envKey ? secrets[relay.envKey] : null;
-  return {
-    id: a.id, name: a.name, cmd: a.cmd, path: a.resolved, installed: a.installed, enabled: a.enabled !== false, strengths: a.strengths,
-    permission: a.permission || 'max', permOptions: Object.keys(a.perm || {}), canModel: !!(a.homeConfig || a.modelFlag), model: a.effectiveModel, modelNote: a.modelNote,
-    relay: a.relay, baseUrl: relay && relay.baseUrl, keyName: relay && relay.envKey, keyMasked: key ? `${key.slice(0, 5)}…${key.slice(-4)}` : null,
-  };
+  const p = a.auth.mode === 'provider' && readProvidersFile().providers.find(x => x.id === a.auth.provider), detail = p ? providerDetail(p) : null;
+  return { id: a.id, name: a.name, cmd: a.cmd, path: a.resolved, installed: a.installed, enabled: a.enabled !== false, strengths: a.strengths,
+    permission: a.permission || 'max', permOptions: Object.keys(a.perm || {}), canModel: !!a.modelFlag || ['codex', 'grok'].includes(a.id), model: a.effectiveModel, effectiveModel: a.effectiveModel, modelNote: a.modelNote,
+    auth: a.auth, providerTypes: PROVIDER_TYPES[a.id] || [], providerSupported: !!PROVIDER_TYPES[a.id]?.length, providerNote: a.id === 'deepseek' ? 'dsh --help / headless --help 未提供服务商注入参数，使用自身配置。' : '', login: loginStatus(a),
+    relay: a.relay, baseUrl: detail?.baseUrl, keyName: detail?.keyEnv, keyMasked: detail?.keyMasked, testScope: agentTestScope(a), test: currentAgentTest(a) };
 }
-const tests = new Map(); // agentId -> {status, ms, output}
+// Alternate PANEL_CONFIG instances keep their test cache beside that config.
+const AGENT_TESTS_FILE = path.join(process.env.PANEL_CONFIG ? path.dirname(CONFIG_FILE) : path.join(HERE, 'logs'), 'agent-tests.json');
+const tests = new Map(Object.entries(readJson(AGENT_TESTS_FILE, {}).results || {}).filter(([, t]) => ['ok', 'failed', 'timeout'].includes(t?.status)));
+const activeAgentTests = new Map();
+function agentTestScope(a, mode = a.auth.mode) {
+  const auth = a.auth || authFor(a), p = mode === 'provider' && readProvidersFile().providers.find(p => p.id === auth.provider);
+  const scope = mode === 'official' ? [a.id, mode] : [a.id, mode, auth.provider, p?.type, p?.baseUrl, auth.model];
+  return createHash('sha256').update(JSON.stringify(scope)).digest('hex');
+}
+function latestAgentTest(a, mode = a.auth.mode) { return tests.get(agentTestScope(a, mode)) || null; }
+function currentAgentTest(a) {
+  const active = activeAgentTests.get(a.id);
+  return active?.scope === agentTestScope(a) ? active : latestAgentTest(a);
+}
+function broadcastAgentTest(a, t) { broadcast('agenttest', { id: a.id, ...t, login: loginStatus(a) }); }
 function testAgent(id) {
   const a = loadAgents().find(x => x.id === id);
   if (!a || !a.installed) throw new Error('agent 未安装');
-  if (tests.get(id)?.status === 'running') return tests.get(id);
-  const t = { status: 'running', startedAt: Date.now(), output: '' };
-  tests.set(id, t); broadcast('agenttest', { id, ...t });
-  const cwd = path.join(HERE, 'logs'); fs.mkdirSync(cwd, { recursive: true });
+  const active = activeAgentTests.get(id);
+  if (active) {
+    if (active.scope !== agentTestScope(a)) throw new Error('该 Agent 正在测试其他认证方式，请等测试结束后再测');
+    return active;
+  }
+  const cwd = path.dirname(AGENT_TESTS_FILE); fs.mkdirSync(cwd, { recursive: true });
+  const invocation = buildInvocation(a, 'Reply with exactly one word: OK', cwd);
+  const t = { status: 'running', startedAt: Date.now(), output: '', authMode: a.auth.mode, provider: a.auth.provider || '', scope: agentTestScope(a) };
+  activeAgentTests.set(id, t); broadcastAgentTest(a, t);
   const logFile = path.join(cwd, `test-${id}.log`); try { fs.unlinkSync(logFile); } catch {}
-  const child = launch(buildInvocation(a, 'Reply with exactly one word: OK', cwd), cwd, logFile, txt => { t.output += stripAnsi(txt); },
-    code => { clearTimeout(timer); t.ms = Date.now() - t.startedAt; t.code = code; t.status = code === 0 && /\bOK\b/i.test(t.output) ? 'ok' : (t.status === 'timeout' ? 'timeout' : 'failed'); t.output = t.output.slice(-1500); broadcast('agenttest', { id, ...t }); }, a.name);
-  const timer = setTimeout(() => { t.status = 'timeout'; killTree(child); }, 180000);
+  const secret = a.auth.mode === 'provider' ? readProvidersFile().providers.find(p => p.id === a.auth.provider) : null, key = secret ? providerKey(secret) : '';
+  let timer;
+  const finish = code => {
+    clearTimeout(timer); t.ms = Date.now() - t.startedAt; t.finishedAt = now(); t.code = code;
+    t.authFailed = authErrorInOutput(t.output);
+    const reply = t.output.replace(/^\$[^\r\n]*\r?\n/, ''); // launch echoes the prompt, which already contains OK.
+    t.status = t.status === 'timeout' ? 'timeout' : code === 0 && !t.authFailed && /\bOK\b/i.test(reply) ? 'ok' : 'failed';
+    t.output = safeProviderErrorOutput(t.output, key).slice(-1500);
+    activeAgentTests.delete(id); tests.set(t.scope, t);
+    try { writeJson(AGENT_TESTS_FILE, { version: 1, results: Object.fromEntries(tests) }); }
+    catch { t.persistenceError = '测试结果保存失败，重启后可能丢失，请重新测连通。'; }
+    broadcastAgentTest(a, t);
+  };
+  let child;
+  try {
+    child = launch(invocation, cwd, logFile, txt => { t.output = safeProviderErrorOutput(t.output + stripAnsi(txt), key); }, finish, a.name);
+  } catch (e) { t.output = safeProviderErrorOutput(e.message, key); finish(-1); return t; }
+  if (t.status === 'running') timer = setTimeout(() => { t.status = 'timeout'; killTree(child); }, 180000);
   return t;
 }
-function fetchModels(id) {
-  const a = loadAgents().find(x => x.id === id), relay = a && homeRelay(a);
-  if (!relay || !relay.baseUrl) throw new Error('这个 agent 没有中转站配置');
-  const key = readEnvFile(a.envFile)[relay.envKey];
-  return fetch(relay.baseUrl.replace(/\/$/, '') + '/models', { headers: { Authorization: `Bearer ${key}` } })
-    .then(r => r.json()).then(j => (j.data || []).map(m => m.id));
+function safeProviderErrorOutput(text, key) { return key ? text.split(key).join('[已隐藏]') : text; }
+async function fetchModels(id) {
+  const a = loadAgents().find(x => x.id === id);
+  if (!a || a.auth.mode !== 'provider') throw new Error('请先选择服务商模式');
+  return (await providerModels(a.auth.provider)).models;
 }
 
 // ---------- 目录浏览 ----------
@@ -771,7 +1182,7 @@ const PANEL_SKILLS = path.join(HERE, 'skills');
 const readCatalog = () => readJson(path.join(PANEL_SKILLS, '_catalog.json'), { categories: [], skills: {} });
 const SKILL_SOURCES = { panel: '精选库', project: '当前项目', 'user-claude': '~/.claude/skills', 'user-agents': '~/.agents/skills', 'user-codex': '~/.codex/skills', plugin: 'Claude 插件' };
 function parseSkillMd(file) {
-  const t = fs.readFileSync(file, 'utf8');
+  const t = readMd(file);
   const fm = t.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   const get = k => {
     if (!fm) return '';
@@ -861,13 +1272,138 @@ function createSkill({ name, description, body }) {
   const dir = path.join(PANEL_SKILLS, n);
   if (exists(dir)) throw new Error('面板技能库里已有同名技能');
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'SKILL.md'), `---\nname: ${n}\ndescription: ${String(description || '').replace(/\r?\n/g, ' ')}\n---\n\n${body || ''}\n`);
+  writeMd(path.join(dir, 'SKILL.md'), `---\nname: ${n}\ndescription: ${String(description || '').replace(/\r?\n/g, ' ')}\n---\n\n${body || ''}\n`);
   skillCache.at = 0;
   return `panel:${n}`;
 }
 
 // ---------- 工作流（Dify 式画布） ----------
 const WF_TEMPLATES = path.join(HERE, 'workflows');
+const automatic = st => ['auto', 'leader'].includes(st.mode);
+const triageTimers = new Map();
+const requirementText = p => exists(p.requirement) ? readMd(p.requirement).trim() : '';
+const requirementId = text => createHash('sha256').update(text).digest('hex');
+const isQuickWorkflow = g => g.template === 'quick-build' || g.id === 'quick-build';
+function workflowStarted(p, st = loadState(p)) {
+  // Filling the input is not substantive execution (nodeStates derives start=done).
+  const g = readWorkflow(p), states = nodeStates(p, st, g);
+  return !!st.wf?.substantiveStartedAt || g.nodes.some(n => n.type !== 'start' && ['done', 'running', 'waiting'].includes(states[n.id]?.status)) ||
+    st.runs.some(r => !['tick', 'triage'].includes(r.kind) && (r.startedAt || ['queued', 'running', 'finished'].includes(r.status))) ||
+    Object.values(st.stages || {}).some(s => ['running', 'review', 'approved'].includes(s.status));
+}
+function leaderWarning(st) { return automatic(st) && !st.leader ? '还没选 Leader，流程不会自动推进' : null; }
+function ensureLeader(p) {
+  const st = loadState(p);
+  if (!automatic(st) || st.leader) return st;
+  const agents = loadAgents();
+  const candidate = ['claude', 'codex', 'grok', 'gemini', 'deepseek'].map(id => agents.find(a => a.id === id)).find(a => a?.available &&
+    (a.auth.mode === 'provider' ? !!providerKey(readProvidersFile().providers.find(p => p.id === a.auth.provider)) : loginStatus(a).status === 'logged-in'));
+  if (candidate) { st.leader = candidate.id; st.leaderAutoSelection = { at: now(), agent: candidate.id, name: candidate.name }; saveState(p, st); }
+  return st;
+}
+function triageSnapshot(p, st) {
+  return { triage: st.triage || null, triagePending: !!st.triagePending, workflowStarted: workflowStarted(p, st), leaderWarning: leaderWarning(st), leaderAutoSelection: st.leaderAutoSelection || null };
+}
+function triageTask(p, resultPath) {
+  return `# 需求分诊（Leader）
+只判断流程，不写实现、不做规划、不调用工具探索项目；仅把结果 JSON 写入指定路径。
+
+需求原文：
+${requirementText(p)}
+
+模板：
+- quick-build：需求 → 一人直接实现 → Leader 评审 → 完成。
+- bmad-standard：需求 → PRD → 架构 → 拆分 Story → 开发看板 → 完成。
+- proposal-pk：两家各出方案 → Leader 汇总比较。
+
+判断标准（按需求本身，不能因为仓库有 BMAD 就选重流程）：
+- small：单文件 / 单页面 / 小工具 / 演示动画 / 脚本，一个人一次能做完 → quick-build。
+- medium/large：多模块、要持久化、多页面、需要拆多个 Story → bmad-standard。
+- 明确要求“比较方案 / 选型 / 出几版看看” → proposal-pk（优先于规模规则）。
+- quick-build 的 agent 从下列可用团队选择；适合实现需求即可，优先当前 Leader。
+当前 Leader：${loadState(p).leader || '未选择'}
+${roster(loadAgents().filter(a => a.available))}
+
+把 JSON 写入 ${resultPath}（UTF-8，不要 Markdown 包裹）：
+{ "size": "small|medium|large", "template": "quick-build|bmad-standard|proposal-pk", "reason": "一句话", "agent": "建议执行实现的 agent id（quick-build 用）" }
+`;
+}
+function localTriage(p, why) {
+  const text = requirementText(p), compare = /比较.{0,8}方案|方案.{0,8}(比较|对比|PK)|选型|出.{0,4}(几|多|两|三|[2-9]).{0,3}版|compare.{0,20}(solution|approach)|alternatives/i.test(text);
+  const complex = /多模块|持久化|多页面|数据库|登录|登陆|注册|权限|后端|后台|多个\s*stor(?:y|ies)|multi[- ]?(page|module)|persist|database|login|backend/i.test(text);
+  const small = /单文件|单页面|一个\s*(?:html|index\.html)|小工具|演示|动画|脚本|single[- ]?(file|page)|script/i.test(text);
+  const size = complex || text.length > 600 ? (text.length > 1800 ? 'large' : 'medium') : small || text.length <= 160 ? 'small' : 'medium';
+  return { size, template: compare ? 'proposal-pk' : size === 'small' ? 'quick-build' : 'bmad-standard', reason: `${why}；${compare ? '需求明确要求比较方案' : size === 'small' ? '需求简短且可由一人一次完成' : '涉及多个功能或持久化，需要拆分规划'}`, agent: loadState(p).leader || loadAgents().find(a => a.available)?.id || '' };
+}
+function applyTriageTemplate(p, template) {
+  const st = loadState(p);
+  if (workflowStarted(p, st)) throw new Error('工作流已开始实质运行，不能自动更换模板');
+  const id = template || st.triage?.template;
+  if (!['quick-build', 'bmad-standard', 'proposal-pk'].includes(id)) throw new Error('没有这个分诊模板');
+  const g = readJson(path.join(WF_TEMPLATES, `${id}.json`), null);
+  if (!g) throw new Error('没有这个模板');
+  if (id === 'quick-build') {
+    const recommended = loadAgents().find(a => a.id === st.triage?.agent && a.available);
+    g.nodes.find(n => n.id === 'impl').config.agent = recommended?.id || st.leader || loadAgents().find(a => a.available)?.id || 'codex';
+    g.nodes.find(n => n.id === 'review').config.agent = 'leader';
+  }
+  writeJson(p.workflow, { ...g, template: id });
+  st.wf = { nodes: {}, running: !!st.wf?.running, startedAt: st.wf?.startedAt };
+  if (st.triage) st.triage.applied = id;
+  saveState(p, st); broadcast('workflow', {});
+}
+function requestTriage(p) {
+  let st = loadState(p);
+  const text = requirementText(p);
+  if (workflowStarted(p, st)) return false;
+  if (!text) {
+    const old = st.triagePending?.runId;
+    if (st.triagePending || st.triage) { delete st.triagePending; delete st.triage; delete st.triageInput; saveState(p, st); if (old) cancel(old, p); }
+    return false;
+  }
+  const input = requirementId(text);
+  if (st.triagePending?.input === input) return true;
+  if (st.triageInput === input && st.triage) {
+    if (automatic(st) && !st.triage.applied) applyTriageTemplate(p);
+    return false;
+  }
+  if (st.triagePending?.runId) {
+    const old = st.triagePending.runId;
+    delete st.triagePending; saveState(p, st); cancel(old, p);
+    st = loadState(p);
+  }
+  st.triagePending = { input, at: now() }; saveState(p, st);
+  if (!st.leader) { finishTriage(p, { triageInput: input }, null, '未选择 Leader'); return false; }
+  try { enqueue({ project: p.root, kind: 'triage', agentId: st.leader }); }
+  catch (e) { finishTriage(p, { triageInput: input }, null, `Leader 分诊失败：${e.message}`); }
+  return !!loadState(p).triagePending;
+}
+function finishTriage(p, run, result, why) {
+  const st = loadState(p), pending = st.triagePending;
+  if (!pending || pending.input !== run.triageInput || (run.id && pending.runId !== run.id)) return;
+  delete st.triagePending;
+  if (why === 'cancelled' || requirementId(requirementText(p)) !== pending.input || workflowStarted(p, st)) { saveState(p, st); return; }
+  const valid = result && ['small', 'medium', 'large'].includes(result.size) && ['quick-build', 'bmad-standard', 'proposal-pk'].includes(result.template) && typeof result.reason === 'string' && result.reason.trim() &&
+    (result.template === 'proposal-pk' || (result.size === 'small' ? result.template === 'quick-build' : result.template === 'bmad-standard'));
+  const picked = valid ? result : localTriage(p, why || 'Leader 分诊结果无效');
+  if (!valid && run.id) { const record = st.runs.find(r => r.id === run.id); if (record) { record.status = 'failed'; record.error = why || 'Leader 分诊结果无效'; } }
+  st.triage = { at: now(), size: picked.size, template: picked.template, reason: picked.reason.trim().slice(0, 500), by: valid ? 'leader' : 'heuristic', agent: typeof picked.agent === 'string' ? picked.agent : st.leader };
+  st.triageInput = pending.input; saveState(p, st);
+  if (automatic(st)) applyTriageTemplate(p);
+  broadcast('state', {});
+  // Defer continuation so save/stop can complete and late triage exits cannot reapply.
+  setImmediate(() => { try { advanceWorkflow(p); autoDispatch(p); if (!isQuickWorkflow(readWorkflow(p))) scheduleTick(p, '需求分诊完成'); } catch (e) { console.error('triage:', e.message); } });
+}
+function finishQuickReview(p, result) {
+  const st = loadState(p), rec = st.wf.nodes.review || {};
+  if (result?.verdict === 'approve') return setNode(p, 'review', { status: 'done', approvedAt: now(), approvedBy: 'leader', note: null });
+  if (result?.verdict !== 'changes') return setNode(p, 'review', { status: 'failed', note: 'Leader 评审没有有效 verdict，请重试评审' });
+  const rounds = (rec.rounds || 0) + 1;
+  if (rounds > maxRounds(st)) return setNode(p, 'review', { status: 'waiting', note: `Leader 已打回 ${rounds - 1} 轮，仍有问题：${result.feedback || result.summary || ''}`, rounds });
+  st.wf.nodes.review = { status: 'idle', rounds, review: result };
+  st.wf.nodes.impl = { status: 'idle', rounds, feedback: result.feedback || result.summary || '请修复 Leader 列出的问题' };
+  saveState(p, st);
+}
 function readWorkflow(p) {
   const g = readJson(p.workflow, null);
   if (g && Array.isArray(g.nodes)) return g;
@@ -883,7 +1419,7 @@ function storyProgress(p) {
 }
 function nodeStates(p, st, g) {
   const rec = (st.wf && st.wf.nodes) || {}, out = {};
-  const reqFilled = exists(p.requirement) && fs.readFileSync(p.requirement, 'utf8').trim();
+  const reqFilled = exists(p.requirement) && readMd(p.requirement).trim();
   for (const n of g.nodes) {
     const c = n.config || {}, r = { ...(rec[n.id] || {}) };
     const running = st.runs.find(x => x.nodeId === n.id && ['queued', 'running'].includes(x.status));
@@ -912,31 +1448,40 @@ function setNode(p, id, patch) { const st = loadState(p); st.wf = st.wf || { nod
 const isLeaderRef = a => !a || a === 'leader';
 function startNode(p, n, feedback) {
   const st = loadState(p), c = n.config || {};
+  if (n.type !== 'start') { st.wf = st.wf || { nodes: {} }; st.wf.substantiveStartedAt ||= now(); saveState(p, st); }
+  feedback ||= st.wf?.nodes?.[n.id]?.feedback;
   if (n.type === 'start') {
-    if (!(exists(p.requirement) && fs.readFileSync(p.requirement, 'utf8').trim())) return setNode(p, n.id, { status: 'waiting', note: '先在这个节点里填写需求' });
+    if (!(exists(p.requirement) && readMd(p.requirement).trim())) return setNode(p, n.id, { status: 'waiting', note: '先在这个节点里填写需求' });
     return setNode(p, n.id, { status: 'done', finishedAt: now(), note: null });
   }
   if (n.type === 'end') return setNode(p, n.id, { status: 'done', finishedAt: now() });
-  if (n.type === 'human') return setNode(p, n.id, isAuto(st) ? { status: 'done', note: '自动模式：已跳过人工确认', finishedAt: now() } : { status: 'waiting' });
+  if (n.type === 'human') return setNode(p, n.id, automatic(st) ? { status: 'done', note: '自动模式：已跳过人工确认', finishedAt: now() } : { status: 'waiting' });
   if (n.type === 'dev') {
     setNode(p, n.id, { status: 'running', startedAt: now() });
-    if (c.autoPlan !== false && !isLeaderMode(st) && !exists(p.plan) && st.leader && exists(p.epics)) { try { enqueue({ kind: 'plan', agentId: st.leader }); } catch {} }
+    if (c.autoPlan !== false && !isLeaderMode(st) && !exists(p.plan) && st.leader && exists(p.epics)) { try { enqueue({ project: p.root, kind: 'plan', agentId: st.leader }); } catch {} }
     setTimeout(() => { try { autoDispatch(p); } catch (e) { console.error(e.message); } }, 0);
     return;
   }
   if (n.type === 'agent') {
     const who = isLeaderRef(c.agent) ? st.leader : c.agent;
     if (!who) return setNode(p, n.id, { status: 'failed', note: '没有选 agent，也没有设 leader' });
-    try { enqueue({ kind: 'node', nodeId: n.id, agentId: who, feedback }); }
+    try { enqueue({ project: p.root, kind: 'node', nodeId: n.id, agentId: who, feedback }); }
     catch (e) { setNode(p, n.id, { status: 'failed', note: e.message }); }
   }
 }
 function advanceWorkflow(p) {
   for (let round = 0; round < 30; round++) {
-    const st = loadState(p);
+    let st = loadState(p);
     if (!st.wf || !st.wf.running) return;
+    if (leaderWarning(st) || requestTriage(p)) return;
+    st = loadState(p);
     const g = readWorkflow(p), ns = nodeStates(p, st, g);
-    if (g.nodes.length && g.nodes.every(n => ns[n.id].status === 'done')) { st.wf.running = false; st.wf.finishedAt = now(); saveState(p, st); broadcast('state', {}); return; }
+    if (g.nodes.length && g.nodes.every(n => ns[n.id].status === 'done')) {
+      // requestTriage may have just replaced the graph; always commit fresh state.
+      const done = loadState(p); done.wf.running = false; done.wf.finishedAt = now();
+      if (isLeaderMode(done) && isQuickWorkflow(g)) { done.leaderBoard = { ...(done.leaderBoard || {}), finished: { at: now(), summary: ns.review?.result?.summary || '快速实现已完成，Leader 评审通过。' }, progress: { is_done: true, making_progress: true, is_looping: false, reason: '快速实现及 Leader 评审已完成' } }; }
+      saveState(p, done); broadcast('state', {}); return;
+    }
     const ready = g.nodes.filter(n => ns[n.id].status === 'idle' && preds(g, n.id).every(id => ns[id] && ns[id].status === 'done'));
     if (!ready.length) return;
     for (const n of ready) startNode(p, n);
@@ -967,15 +1512,16 @@ ${skillsBlock}
 ${decisionsBlock(st)}${autoExtra}
 ## 指令
 ${c.prompt || '（未填写具体指令：根据上游产出，完成本节点标题所描述的工作）'}
+${isQuickWorkflow(g) ? `界面验证使用无头工具（不打开窗口）：${UI_TOOL}` : ''}
 ${c.outputDoc ? `\n产出文档写到：${c.outputDoc}\n` : ''}
 ## 输出（必须）
 把下面格式的 JSON 写入 ${resultPath}（UTF-8，不要 Markdown 包裹）：
-{"doc":"产出文档相对路径（没有就留空）","summary":"三句话以内","open_questions":["..."]}
+${isQuickWorkflow(g) && nodeId === 'review' ? '{"verdict":"approve 或 changes","feedback":"changes 时逐条写清需要修复的问题","doc":"","summary":"三句话以内","open_questions":[]}' : '{"doc":"产出文档相对路径（没有就留空）","summary":"三句话以内","open_questions":["..."]}'}
 `;
 }
 function wfSnapshot(p) {
   const st = loadState(p), g = readWorkflow(p);
-  return { graph: g, states: nodeStates(p, st, g), running: !!(st.wf && st.wf.running), templates: listTemplates(), requirement: exists(p.requirement) ? fs.readFileSync(p.requirement, 'utf8') : '' };
+  return { ...triageSnapshot(p, st), graph: g, states: nodeStates(p, st, g), running: !!(st.wf && st.wf.running), templates: listTemplates(), requirement: exists(p.requirement) ? readMd(p.requirement) : '' };
 }
 
 // ---------- 自动模式（Leader 自动评审、自动选技能、自动派发） ----------
@@ -1061,8 +1607,8 @@ function autoDispatch(p) {
   const g = readWorkflow(p), ns = nodeStates(p, st, g), dev = g.nodes.find(n => n.type === 'dev');
   if (!dev || ns[dev.id].status !== 'running' || !exists(p.epics) || !exists(p.sprint)) return;
   const plan = readPlan(p);
-  if (!plan) { if (!st.runs.some(r => r.kind === 'plan' && ['queued', 'running'].includes(r.status))) { try { enqueue({ kind: 'plan', agentId: st.leader }); } catch (e) { console.error(e.message); } } return; }
-  const snap = snapshot(), active = new Set(st.runs.filter(r => ['queued', 'running'].includes(r.status)).map(r => r.storyKey));
+  if (!plan) { if (!st.runs.some(r => r.kind === 'plan' && ['queued', 'running'].includes(r.status))) { try { enqueue({ project: p.root, kind: 'plan', agentId: st.leader }); } catch (e) { console.error(e.message); } } return; }
+  const snap = snapshot(p.root), active = new Set(st.runs.filter(r => ['queued', 'running'].includes(r.status)).map(r => r.storyKey));
   const statusOf = k => (snap.stories.find(s => s.key === k) || {}).status;
   for (const s of snap.stories) {
     if (active.has(s.key)) continue;
@@ -1073,29 +1619,39 @@ function autoDispatch(p) {
       if ((a && a.depends_on || []).some(k => statusOf(k) !== 'done')) continue; // 对不上号的依赖也算没完成，宁可等
       const agent = st.assignments[s.key] || st.leader;
       if (!st.assignments[s.key]) { const s2 = loadState(p); s2.assignments[s.key] = agent; saveState(p, s2); }
-      try { enqueue({ kind: 'implement', storyKey: s.key, agentId: agent }); active.add(s.key); } catch (e) { console.error(e.message); }
+      try { enqueue({ project: p.root, kind: 'implement', storyKey: s.key, agentId: agent }); active.add(s.key); } catch (e) { console.error(e.message); }
     } else if (s.status === 'review') {
       const lastImpl = [...st.runs].reverse().find(r => r.storyKey === s.key && r.kind === 'implement');
       const lastRev = [...st.runs].reverse().find(r => r.storyKey === s.key && r.kind === 'review');
-      if (!lastRev || (lastImpl && lastRev.createdAt < lastImpl.createdAt)) { try { enqueue({ kind: 'review', storyKey: s.key, agentId: st.leader }); active.add(s.key); } catch (e) { console.error(e.message); } }
+      if (!lastRev || (lastImpl && lastRev.createdAt < lastImpl.createdAt)) { try { enqueue({ project: p.root, kind: 'review', storyKey: s.key, agentId: st.leader }); active.add(s.key); } catch (e) { console.error(e.message); } }
+    }
+  }
+}
+function resumeAutomaticNodes(p) {
+  const st = loadState(p);
+  if (!automatic(st) || !st.leader) return;
+  const g = readWorkflow(p), ns = nodeStates(p, st, g);
+  for (const n of g.nodes) {
+    if (ns[n.id].status !== 'waiting') continue;
+    if (n.type === 'human') setNode(p, n.id, { status: 'done', note: '自动模式：已跳过人工确认', finishedAt: now() });
+    else if (isQuickWorkflow(g) && n.id === 'review') {
+      if (['approve', 'changes'].includes(ns[n.id].result?.verdict)) finishQuickReview(p, ns[n.id].result);
+      else setNode(p, n.id, { status: 'idle', note: null });
+    } else if (n.type === 'agent' && isAuto(st)) {
+      try { enqueue({ project: p.root, kind: 'nodereview', nodeId: n.id, agentId: st.leader }); } catch (e) { console.error(e.message); }
     }
   }
 }
 function setMode(p, mode, rounds) {
-  const st = loadState(p);
+  let st = loadState(p);
   if (mode) st.mode = ['auto', 'leader'].includes(mode) ? mode : 'manual';
   if (st.mode === 'leader') { st.wf = st.wf || { nodes: {} }; st.wf.running = true; st.leaderBoard = { ...(st.leaderBoard || {}), error: null, idleTicks: 0, finished: null }; }
   if (rounds) st.maxRounds = Math.max(1, Math.min(5, +rounds));
   saveState(p, st);
+  if (mode && automatic(st)) st = ensureLeader(p);
+  if (mode && automatic(st)) resumeAutomaticNodes(p);
   if (isLeaderMode(st)) { advanceWorkflow(p); scheduleTick(p, '切换到 Leader 统筹'); return; }
   if (isAuto(st)) {
-    // 切到自动：正在等确认的节点交给 Leader 评审，人工确认节点直接放行
-    const g = readWorkflow(p), ns = nodeStates(p, st, g);
-    for (const n of g.nodes) {
-      if (ns[n.id].status !== 'waiting') continue;
-      if (n.type === 'human') setNode(p, n.id, { status: 'done', note: '自动模式：已跳过人工确认', finishedAt: now() });
-      if (n.type === 'agent' && st.leader) { try { enqueue({ kind: 'nodereview', nodeId: n.id, agentId: st.leader }); } catch (e) { console.error(e.message); } }
-    }
     advanceWorkflow(p); autoDispatch(p);
   }
 }
@@ -1104,9 +1660,9 @@ function setMode(p, mode, rounds) {
 // 参考 Magentic-One 的 Orchestrator：Task Ledger（全局笔记：事实、计划、风险）+ Progress Ledger（每轮判断是否完成、
 // 是否在兜圈子、下一步谁做什么）；以及 LangGraph supervisor：成员做完都回到 Leader，由 Leader 决定下一步。
 const isLeaderMode = st => st.mode === 'leader';
-const KIND_CN = { plan: '分配', implement: '执行 Story', review: '评审', node: '规划节点', nodereview: '节点评审', task: '临时任务', stage: '阶段', tick: 'Leader 唤醒' };
+const KIND_CN = { triage: '需求分诊', plan: '分配', implement: '执行 Story', review: '评审', node: '工作流节点', nodereview: '节点评审', task: '临时任务', stage: '阶段', tick: 'Leader 唤醒' };
 const clip = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n) + '…' : s; };
-const resultOf = (p, r) => r ? readJson(runFiles(p, r).result, null) : null;
+const resultOf = (p, r) => readAgentResult(p, r);
 function fullStoryKey(p, k) {
   if (!k) return k;
   const keys = Object.keys(readSprint(p.sprint)).filter(x => /^\d+-\d+-/.test(x));
@@ -1174,9 +1730,12 @@ ${noRepeat}`;
 ${noRepeat}`;
 }
 function leaderBrief(p, resultPath) {
-  const st = loadState(p), snap = snapshot(), g = readWorkflow(p), ns = nodeStates(p, st, g), L = st.leaderBoard || {};
+  const st = loadState(p), snap = snapshot(p.root), g = readWorkflow(p), ns = nodeStates(p, st, g), L = st.leaderBoard || {};
+  const lastTick = [...st.runs].reverse().find(r => r.kind === 'tick' && r.hasResult), lastResult = readAgentResult(p, lastTick);
+  const encodingReminder = L.encodingBroken || hasBrokenEncoding({ notes: L.notes, summary: L.finished?.summary }) || hasBrokenEncoding(lastResult)
+    ? '上一轮你写的 notes / summary 编码损坏成了问号，请用 UTF-8 文件方式重写' : '';
   const since = L.lastTickAt || '1970';
-  const req = exists(p.requirement) ? fs.readFileSync(p.requirement, 'utf8') : '';
+  const req = exists(p.requirement) ? readMd(p.requirement) : '';
   const nodes = g.nodes.map(n => { const s = ns[n.id]; return `- ${n.id}｜${n.title}｜${n.type}${n.config && n.config.preset ? '/' + n.config.preset : ''}｜${s.status}${s.doc ? '｜文档 ' + s.doc : ''}${s.result && s.result.open_questions && s.result.open_questions.length ? `｜执行者列了 ${s.result.open_questions.length} 个开放问题` : ''}`; }).join('\n');
   const stories = snap.stories.map(s => {
     const impl = [...st.runs].reverse().find(r => r.storyKey === s.key && r.kind === 'implement'), res = resultOf(p, impl);
@@ -1185,7 +1744,7 @@ function leaderBrief(p, resultPath) {
     const cc = s.status === 'review' ? crossCheckDone(p, st, s.key) : null;
     return `- ${s.key}｜${s.title}｜${s.status}｜负责人 ${s.agent || '未分配'}｜${isUiStory(s) ? '界面类' : '非界面'}｜推荐技能 ${recommendSkills(p, s).join(',')}${cc ? '｜交叉验收：' + (cc.ok ? '已完成（' + cc.qa.agent + '）' : '未完成') : ''}｜已执行 ${tries} 次${a && a.depends_on && a.depends_on.length ? '｜建议依赖 ' + a.depends_on.map(k => k.split('-').slice(0, 2).join('.')).join(',') : ''}${impl ? `｜最近执行 ${impl.status}` : ''}${res ? `｜结果：${clip(res.summary, 160)}；测试${res.tests ? (res.tests.passed ? '通过' : '未通过') : '未报'}` : ''}${s.feedback ? '｜打回意见：' + clip(s.feedback, 160) : ''}`;
   }).join('\n');
-  const active = st.runs.filter(r => r.kind !== 'tick' && ['queued', 'running'].includes(r.status));
+  const active = st.runs.filter(r => !['tick', 'triage'].includes(r.kind) && ['queued', 'running'].includes(r.status));
   const agents = snap.agents.map(a => `- ${a.id}（${a.name}）｜${a.available ? '可用' : '不可用，不要派'}｜进行中 ${active.filter(r => r.agent === a.id).length}｜${a.strengths}`).join('\n');
   const fresh = st.runs.filter(r => r.kind !== 'tick' && r.endedAt && r.endedAt > since).map(r => {
     const res = resultOf(p, r);
@@ -1207,6 +1766,7 @@ ${res ? clip(JSON.stringify(res), 1500) : '（没有结果文件）'}${r.changed
 ${clip(req, 4000) || '（还没有需求）'}
 
 ## 你的全局笔记（上一轮你自己写的：已知事实、计划、风险）
+${encodingReminder ? `提示：${encodingReminder}\n` : ''}
 ${L.notes || '（第一次唤醒：先建立笔记）'}
 
 ## 规划节点（工作流）
@@ -1246,7 +1806,7 @@ ${acceptRules(acceptLevel(st))}
 3. 有空闲 agent、有可做的事就派满（不超过并发上限）；按特长分配，别让一个人包揽。
 4. 同一个 Story 执行超过 3 次还不行，就换人、拆成临时任务，或 ask_human。
 5. 判断有没有在兜圈子（同样的失败反复出现、没有进展），有就换思路，并写进笔记。
-6. 规划按顺序推进：需求 → PRD → 架构 → 拆分；拆分通过后才有 Story。规划节点的开放问题由你拍板，把决定写进 approve_node 前的笔记里。
+6. 严格按上面的实际工作流推进；只有图中包含 PRD / 架构 / 拆分节点时才走 BMAD，不能自行增加这些步骤。没有开发看板的工作流无需 Story；所有节点完成即可交付。规划节点的开放问题由你拍板，把决定写进 approve_node 前的笔记里。不要重复派发已经由图调度的节点任务。
 7. 没有可做的事、只需等正在运行的任务时，actions 给空数组即可。
 8. 不要派需要打开浏览器窗口、操作桌面、读写系统剪贴板、安装软件的任务。界面实测一律用 ui-check 无头工具（这是允许的，不冲突），能自动测的都要测。实在测不了的（真实系统剪贴板、和真 Excel 往返、下载对话框）才留给客户，最多 3 条，写在 finish 的 summary 里。
 9. 派 Story 时，该 Story 的“推荐技能”会由面板自动带上，skills 里不用重复写；只写推荐之外你认为这次还需要的技能（技能库里挑，可空）。
@@ -1291,12 +1851,13 @@ ${FORBIDDEN}
 function scheduleTick(p, why) {
   const st = loadState(p);
   if (!isLeaderMode(st) || !st.leader) return;
+  if (!st.wf?.running || !requirementText(p) || st.triagePending || requestTriage(p) || isQuickWorkflow(readWorkflow(p))) return;
   const L = st.leaderBoard = st.leaderBoard || {};
   if (L.finished || (L.ask && !L.ask.answered) || L.error) return;
   if (st.runs.some(r => r.kind === 'tick' && ['queued', 'running'].includes(r.status))) { L.pending = true; saveState(p, st); return; }
   if ((L.ticks || 0) >= 300) { L.error = 'Leader 唤醒次数达到上限 300，已暂停'; saveState(p, st); return; }
   saveState(p, st);
-  try { enqueue({ kind: 'tick', agentId: st.leader, title: why || '' }); } catch (e) { console.error('tick:', e.message); }
+  try { enqueue({ project: p.root, kind: 'tick', agentId: st.leader, title: why || '' }); } catch (e) { console.error('tick:', e.message); }
 }
 function approveNodeCore(p, id) {
   const g = readWorkflow(p), n = g.nodes.find(x => x.id === id);
@@ -1322,6 +1883,7 @@ function applyTick(p, run, result) {
     return;
   }
   L.fails = 0; L.notes = result.notes || L.notes; L.progress = result.progress || null;
+  L.encodingBroken = hasBrokenEncoding(result) || isBrokenText(L.notes);
   saveState(p, st);
   const log = { at: now(), run: run.id, progress: result.progress || null, actions: [] };
   for (const a0 of Array.isArray(result.actions) ? result.actions : []) {
@@ -1340,8 +1902,8 @@ function applyTick(p, run, result) {
           s2.assignments[a.story] = a.agent;
           s2.leaderInstr = s2.leaderInstr || {}; s2.leaderInstr[a.story] = { instructions: a.instructions || '', skills: a.skills || [], autoSkills: a.autoSkills || [], writes: a.writes || [] };
           saveState(p, s2);
-          enqueue({ kind: 'implement', storyKey: a.story, agentId: a.agent });
-        } else enqueue({ kind: 'task', agentId: a.agent, title: a.title || '临时任务', instructions: a.instructions || '', skills: a.skills || [], relatedStory: a.story || null });
+          enqueue({ project: p.root, kind: 'implement', storyKey: a.story, agentId: a.agent });
+        } else enqueue({ project: p.root, kind: 'task', agentId: a.agent, title: a.title || '临时任务', instructions: a.instructions || '', skills: a.skills || [], relatedStory: a.story || null });
       } else if (a.type === 'set_status') {
         if (a.status === 'done') {
           const s0 = loadState(p), ev = Array.isArray(a.evidence) ? a.evidence : [];
@@ -1366,14 +1928,18 @@ function applyTick(p, run, result) {
         if (!n) throw new Error('没有这个节点');
         setNode(p, n.id, { status: 'idle' }); startNode(p, n, a.feedback || null);
       } else if (a.type === 'ask_human') { const s2 = loadState(p); s2.leaderBoard.ask = { q: a.question, at: now(), answered: false }; saveState(p, s2); }
-      else if (a.type === 'finish') { const s2 = loadState(p); s2.leaderBoard.finished = { at: now(), summary: a.summary || '' }; if (s2.wf) s2.wf.running = false; saveState(p, s2); }
+      else if (a.type === 'finish') {
+        const s2 = loadState(p), g = readWorkflow(p), ns = nodeStates(p, s2, g);
+        if (g.nodes.some(n => ns[n.id]?.status !== 'done') || s2.runs.some(r => !['tick', 'triage'].includes(r.kind) && ['queued', 'running'].includes(r.status))) throw new Error('工作流尚未全部完成，不能提前交付');
+        s2.leaderBoard.finished = { at: now(), summary: a.summary || '' }; if (s2.wf) s2.wf.running = false; saveState(p, s2);
+      }
       else outcome = '未知动作';
     } catch (e) { outcome = '失败：' + e.message; }
     log.actions.push({ ...a, outcome });
   }
   const s3 = loadState(p), L3 = s3.leaderBoard;
   L3.log = [...(L3.log || []), log].slice(-80);
-  const activeNow = s3.runs.some(r => r.kind !== 'tick' && ['queued', 'running'].includes(r.status));
+  const activeNow = s3.runs.some(r => !['tick', 'triage'].includes(r.kind) && ['queued', 'running'].includes(r.status));
   if (activeNow || log.actions.length) L3.idleTicks = 0;
   saveState(p, s3);
   if (pend) return scheduleTick(p, '唤醒期间有新事件');
@@ -1389,7 +1955,7 @@ function applyTick(p, run, result) {
 function storyTimeline(p) {
   const st = loadState(p), parsed = parseEpics(p.epics), sprint = readSprint(p.sprint), L = st.leaderBoard || {};
   const acts = (L.log || []).flatMap(g => (g.actions || []).map(a => ({ ...a, at: g.at })));
-  const brief = (r) => { const res = readJson(runFiles(p, r).result, null); return res; };
+  const brief = r => readAgentResult(p, r);
   return parsed.stories.map(s => {
     const key = Object.keys(sprint).find(k => k.startsWith(`${s.epic}-${s.n}-`)) || `${s.epic}-${s.n}`;
     const ev = [];
@@ -1421,14 +1987,14 @@ const needProject = () => { if (!config.project || !exists(config.project)) thro
 const routes = {
   // ---- 技能库 ----
   'GET /api/skills': () => scanSkills(config.project && exists(config.project) ? config.project : null).map(({ dir, ...s }) => ({ ...s, path: dir })),
-  'GET /api/skills/content': ({ id }) => { const sk = scanSkills(config.project).find(s => s.id === id); if (!sk) throw new Error('找不到这个技能'); return { ...sk, content: fs.readFileSync(path.join(sk.dir, 'SKILL.md'), 'utf8'), files: [...walk(sk.dir)].map(f => path.relative(sk.dir, f).replace(/\\/g, '/')).slice(0, 50) }; },
+  'GET /api/skills/content': ({ id }) => { const sk = scanSkills(config.project).find(s => s.id === id); if (!sk) throw new Error('找不到这个技能'); return { ...sk, content: readMd(path.join(sk.dir, 'SKILL.md')), files: [...walk(sk.dir)].map(f => path.relative(sk.dir, f).replace(/\\/g, '/')).slice(0, 50) }; },
   'POST /api/skills/install': ({ id }) => { const sk = installSkill(needProject(), id); return { ok: true, folder: sk.installedFolder }; },
   'POST /api/skills/import': ({ id }) => { importSkill(config.project, id); return { ok: true }; },
   'POST /api/skills/create': b => ({ id: createSkill(b) }),
   'POST /api/skills/save': ({ id, content }) => {
     const sk = scanSkills(config.project).find(s => s.id === id);
     if (!sk || sk.source !== 'panel') throw new Error('只有面板技能库里的技能能在这里编辑');
-    fs.writeFileSync(path.join(sk.dir, 'SKILL.md'), content); skillCache.at = 0; return { ok: true };
+    writeMd(path.join(sk.dir, 'SKILL.md'), content); skillCache.at = 0; return { ok: true };
   },
   // ---- 工作流 ----
   'GET /api/workflow': () => wfSnapshot(needProject()),
@@ -1442,13 +2008,16 @@ const routes = {
     writeJson(p.workflow, graph); broadcast('workflow', {}); return { ok: true };
   },
   'POST /api/workflow/template': ({ file }) => {
-    const p = needProject(), t = readJson(path.join(WF_TEMPLATES, path.basename(file || '')), null);
+    const p = needProject();
+    if (workflowStarted(p) || loadState(p).triagePending) throw new Error('工作流已开始或正在分诊，不能更换模板');
+    const t = readJson(path.join(WF_TEMPLATES, path.basename(file || '')), null);
     if (!t) throw new Error('没有这个模板');
-    writeJson(p.workflow, { name: t.name, nodes: t.nodes, edges: t.edges });
+    writeJson(p.workflow, { ...t, template: path.basename(file, '.json') });
     const st = loadState(p); st.wf = { nodes: {}, running: false }; saveState(p, st);
     broadcast('state', {}); return wfSnapshot(p);
   },
-  'POST /api/workflow/run': () => { const p = needProject(), st = loadState(p); st.wf = st.wf || { nodes: {} }; st.wf.running = true; st.wf.startedAt = now(); saveState(p, st); advanceWorkflow(p); autoDispatch(p); broadcast('state', {}); return wfSnapshot(p); },
+  'POST /api/triage/apply': ({ template }) => { const p = needProject(); if (loadState(p).triagePending) throw new Error('正在分诊，请稍候'); applyTriageTemplate(p, template); broadcast('state', {}); return wfSnapshot(p); },
+  'POST /api/workflow/run': () => { const p = needProject(); ensureLeader(p); const st = loadState(p); st.wf = st.wf || { nodes: {} }; st.wf.running = true; st.wf.startedAt = now(); saveState(p, st); requestTriage(p); advanceWorkflow(p); autoDispatch(p); scheduleTick(p, '运行工作流'); broadcast('state', {}); return wfSnapshot(p); },
   'POST /api/leader/tick': () => { const p = needProject(), st = loadState(p); st.leaderBoard = { ...(st.leaderBoard || {}), error: null, idleTicks: 0, fails: 0 }; saveState(p, st); scheduleTick(p, '老板手动唤醒'); return snapshot(); },
   'POST /api/leader/answer': ({ text }) => {
     const p = needProject(), st = loadState(p), L = st.leaderBoard || {};
@@ -1491,11 +2060,11 @@ const routes = {
     if (!exists(path.join(project, '_bmad'))) return { needsSetup: true, path: path.resolve(project) };
     useProject(project); return snapshot();
   },
-  'POST /api/project/create': ({ name, parent, template }) => {
+  'POST /api/project/create': ({ name, parent, template, requirement, mode }) => {
     if (!name) throw new Error('项目名不能为空');
     const dir = path.join(parent || config.projectsRoot, slug(name));
     if (exists(dir) && fs.readdirSync(dir).length) throw new Error(`目录已存在且不为空：${dir}`);
-    return setupProject(dir, template === 'generic' ? 'generic' : 'embedded', true);
+    return setupProject(dir, template === 'generic' ? 'generic' : 'embedded', true, { requirement, mode });
   },
   'POST /api/project/setup': ({ path: dir, template }) => { if (!isDir(dir)) throw new Error('目录不存在'); return setupProject(path.resolve(dir), template === 'generic' ? 'generic' : 'embedded', false); },
   'GET /api/setup': ({ dir }) => { const j = setupJobs.get(dir); if (!j) return { status: 'none' }; return { ...j, log: exists(j.logFile) ? stripAnsi(fs.readFileSync(j.logFile, 'utf8')).slice(-4000) : '' }; },
@@ -1505,8 +2074,24 @@ const routes = {
     if (projectsRoot) config.projectsRoot = projectsRoot;
     saveConfig(); pump(); return snapshot();
   },
-  'POST /api/leader': ({ agent, skills }) => { const p = needProject(), st = loadState(p); if (agent !== undefined) st.leader = agent || null; if (Array.isArray(skills)) st.leaderSkills = skills; saveState(p, st); return snapshot(); },
-  'POST /api/requirement': ({ text }) => { const p = needProject(); fs.mkdirSync(p.panel, { recursive: true }); fs.writeFileSync(p.requirement, text || ''); return snapshot(); },
+  'POST /api/leader': ({ agent, skills }) => {
+    const p = needProject(), st = loadState(p);
+    if (agent !== undefined) { if (agent && !loadAgents().some(a => a.id === agent)) throw new Error('没有这个 Leader'); st.leader = agent || null; }
+    if (Array.isArray(skills)) st.leaderSkills = skills; saveState(p, st);
+    if (st.leader && st.wf?.running && automatic(st)) { resumeAutomaticNodes(p); advanceWorkflow(p); autoDispatch(p); scheduleTick(p, '已选择 Leader'); }
+    broadcast('state', {}); return snapshot();
+  },
+  'POST /api/requirement': ({ text }) => {
+    const p = needProject(); fs.mkdirSync(p.panel, { recursive: true }); writeMd(p.requirement, text || '');
+    const st = loadState(p);
+    if (!workflowStarted(p, st)) {
+      st.wf = st.wf || { nodes: {} }; st.wf.nodes ||= {};
+      for (const n of readWorkflow(p).nodes.filter(n => n.type === 'start')) delete st.wf.nodes[n.id];
+      if (automatic(st)) st.wf.running = true;
+      saveState(p, st); requestTriage(p); advanceWorkflow(p);
+    }
+    broadcast('state', {}); return snapshot();
+  },
   'POST /api/stage/run': ({ stage, agent, feedback }) => {
     const p = needProject(), st = loadState(p);
     if (!STAGES.includes(stage)) throw new Error('未知阶段');
@@ -1544,8 +2129,24 @@ const routes = {
     saveState(p, st); setStoryStatus(p, key, status); advanceWorkflow(p); autoDispatch(p); return snapshot();
   },
   'POST /api/cancel': ({ runId }) => { cancel(runId); return { ok: true }; },
+  'POST /api/pty/resize': ({ id, cols, rows }) => {
+    if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols < 2 || cols > 500 || rows < 2 || rows > 300) throw new Error('终端尺寸必须为整数（列 2–500，行 2–300）');
+    activePty(id).resize(cols, rows); return { ok: true };
+  },
+  'POST /api/pty/input': ({ id, data }) => {
+    if (typeof data !== 'string' || Buffer.byteLength(data, 'utf8') > 16384) throw new Error('输入必须为不超过 16 KiB 的文本');
+    activePty(id).write(data); return { ok: true };
+  },
   'POST /api/sprint/refresh': async () => { await refreshSprint(needProject()); return snapshot(); },
-  'GET /api/agents': () => loadAgents().map(agentDetail).map(d => ({ ...d, test: tests.get(d.id) || null })),
+  'GET /api/providers': () => readProvidersFile().providers.map(providerDetail),
+  'POST /api/providers/save': ({ id, patch }) => saveProvider(id, patch || {}),
+  'POST /api/providers/delete': ({ id }) => deleteProvider(id),
+  'POST /api/providers/secret': ({ id, value }) => setProviderSecret(id, value),
+  'POST /api/providers/check': ({ id }) => checkProvider(id),
+  'POST /api/providers/models': ({ id }) => providerModels(id),
+  'GET /api/agents/login-status': ({ id }) => { const a = loadAgents().find(x => x.id === id); if (!a) throw new Error('没有这个 agent'); return loginStatus(a); },
+  'POST /api/agents/login': ({ id }) => loginAgent(id),
+  'GET /api/agents': () => loadAgents().map(agentDetail),
   'POST /api/agents/save': ({ id, patch }) => { saveAgent(id, patch || {}); return loadAgents().map(agentDetail); },
   'POST /api/agents/secret': ({ id, value }) => { if (!value) throw new Error('key 不能为空'); setSecret(id, value); return { ok: true }; },
   'POST /api/agents/test': ({ id }) => testAgent(id),
@@ -1554,7 +2155,9 @@ const routes = {
     const p = needProject(), r = loadState(p).runs.find(x => x.id === id);
     if (!r) throw new Error('没有这个运行');
     const f = runFiles(p, r);
-    return { log: exists(f.log) ? stripAnsi(fs.readFileSync(f.log, 'utf8')) : '', task: exists(f.task) ? fs.readFileSync(f.task, 'utf8') : '', result: readJson(f.result, null), run: r };
+    const log = exists(f.log) ? fs.readFileSync(f.log, 'utf8') : '';
+    const result = readAgentResult(p, r);
+    return { log, logBytes: Buffer.byteLength(log, 'utf8'), task: exists(f.task) ? readMd(f.task) : '', result, run: r };
   },
   'GET /api/diff': ({ id, file }) => {
     const p = needProject(), r = loadState(p).runs.find(x => x.id === id);
@@ -1565,13 +2168,28 @@ const routes = {
   'GET /api/doc': ({ path: rel }) => {
     const root = needProject().root, f = path.resolve(root, rel || '');
     if (!f.startsWith(path.resolve(root) + path.sep)) throw new Error('路径越界');
-    return { text: fs.readFileSync(f, 'utf8') };
+    return { text: readMd(f) };
   },
 };
 
+ensureAuthData();
+
+// Fixed allowlist: no arbitrary access to node_modules or third-party CDN.
+const TERM_ASSETS = {
+  '/vendor/xterm/xterm.js': ['@xterm/xterm/lib/xterm.js', 'text/javascript; charset=utf-8'],
+  '/vendor/xterm/xterm.css': ['@xterm/xterm/css/xterm.css', 'text/css; charset=utf-8'],
+  '/vendor/xterm/addon-fit.js': ['@xterm/addon-fit/lib/addon-fit.js', 'text/javascript; charset=utf-8'],
+};
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   try {
+    if (TERM_ASSETS[url.pathname]) {
+      if (!['GET', 'HEAD'].includes(req.method)) return send(res, 405, { error: 'method not allowed' });
+      const [rel, type] = TERM_ASSETS[url.pathname];
+      let file;
+      try { file = createRequire(import.meta.url).resolve(rel); } catch { return send(res, 404, { error: '请先运行 npm install 安装终端资源' }); }
+      return send(res, 200, req.method === 'HEAD' ? '' : fs.readFileSync(file), type);
+    }
     if (url.pathname === '/' || url.pathname === '/index.html') return send(res, 200, fs.readFileSync(path.join(HERE, 'index.html'), 'utf8'), 'text/html; charset=utf-8');
     if (url.pathname === '/api/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
@@ -1589,6 +2207,12 @@ server.listen(PORT, '127.0.0.1', () => {
     const p = P(config.project), st = loadState(p);
     let dirty = false;
     for (const r of st.runs) if (['queued', 'running'].includes(r.status)) { r.status = 'failed'; r.error = '面板重启，运行中断'; dirty = true; }
+    if (st.triagePending) {
+      const interrupted = st.runs.find(r => r.id === st.triagePending.runId);
+      if (interrupted) { interrupted.status = 'failed'; interrupted.error = '面板重启，分诊中断；已使用本地判断'; }
+      st.triage = { at: now(), ...localTriage(p, '面板重启，Leader 分诊中断'), by: 'heuristic' }; st.triageInput = st.triagePending.input;
+      delete st.triagePending; dirty = true;
+    }
     for (const s of Object.values(st.stages || {})) if (s.status === 'running') { s.status = 'failed'; dirty = true; }
     const g = readWorkflow(p);
     for (const [id, s] of Object.entries((st.wf && st.wf.nodes) || {})) {
@@ -1596,6 +2220,7 @@ server.listen(PORT, '127.0.0.1', () => {
       if (s.status === 'running' && n && n.type === 'agent') { s.status = 'failed'; s.note = '面板重启，运行中断'; dirty = true; }
     }
     if (dirty) saveState(p, st);
+    if (st.triage && automatic(st) && !st.triage.applied && !workflowStarted(p, st)) applyTriageTemplate(p);
     // 重启后：Leader 模式接着统筹，规则自动模式接着派发
     setTimeout(() => { try { if (isLeaderMode(loadState(p))) scheduleTick(p, '面板重启后继续'); else { advanceWorkflow(p); autoDispatch(p); } } catch (e) { console.error(e.message); } }, 1500);
   }

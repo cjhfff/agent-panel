@@ -1,6 +1,7 @@
 {
+  "id": "quick-build",
   "name": "快速实现 + 评审",
-  "description": "小需求不走完整规划：需求 → 一个 agent 直接实现 → leader 评审 → 你确认",
+  "description": "小需求不走完整规划：需求 → 一个 agent 直接实现 → Leader 评审 → 完成（自动模式无需人工确认）",
   "nodes": [
     {
       "id": "start",
@@ -17,11 +18,9 @@
       "y": 200,
       "config": {
         "agent": "codex",
-        "skills": [
-          "project:bmad-build"
-        ],
+        "skills": [],
         "approval": false,
-        "prompt": "按需求直接实现。先读 AGENTS.md；先写测试再写实现；测试全部通过才算完成。最后在 summary 里写清改了哪些文件、怎么验证的。"
+        "prompt": "按需求直接实现，不写 PRD、架构或 Story。若有 AGENTS.md 则遵守；按需求规模验证，界面使用面板的无头工具。最后在 summary 里写清改了哪些文件、怎么验证和如何使用。"
       }
     },
     {
@@ -32,11 +31,9 @@
       "y": 200,
       "config": {
         "agent": "leader",
-        "skills": [
-          "project:bmad-code-review"
-        ],
+        "skills": [],
         "approval": true,
-        "prompt": "只读评审上游实现：对照需求和 AGENTS.md 的规则逐条检查，运行测试命令确认。把问题按严重程度列在 open_questions 里，没有问题就写“建议通过”。不要改代码。"
+        "prompt": "只读评审上游实现：逐条对照需求，运行适当验证；界面必须用面板无头工具实测。不要改实现代码，不追加规划或 Story。无阻断问题 verdict=approve，有阻断问题 verdict=changes 并在 feedback 中逐条列出；由面板自动通过或交回原实现者修复。summary 写清验收结果和使用方法。"
       }
     },
     {
