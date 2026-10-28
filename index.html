@@ -402,12 +402,20 @@
   .lamp { position: relative; width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; font: 650 11px/1 var(--font-mono); letter-spacing: .02em;
     color: color-mix(in srgb, var(--c) 85%, var(--text)); background: color-mix(in srgb, var(--c) 9%, var(--panel)); border: 1px solid color-mix(in srgb, var(--c) 28%, var(--line)); cursor: default; transition: box-shadow .3s, opacity .3s; }
   .lamp::after { content: ''; position: absolute; top: -3px; right: -3px; width: 9px; height: 9px; border-radius: 50%; background: var(--line-strong); border: 2px solid var(--panel); }
-  .lamp.idle::after { background: var(--ok); }
+  /* CREW authentication state stays visible even while a task is running. */
+  .crew .lamp { padding: 0; gap: 0; cursor: pointer; }
+  .crew .lamp:hover:not(:disabled) { color: color-mix(in srgb, var(--c) 85%, var(--text)); background: color-mix(in srgb, var(--c) 14%, var(--panel)); border-color: color-mix(in srgb, var(--c) 45%, var(--line)); }
+  .crew .lamp.available::after { background: var(--ok); }
+  .crew .lamp.unverified { border-style: dashed; border-color: var(--line-strong); }
+  .crew .lamp.unverified::after { background: var(--faint); }
+  .crew .lamp.invalid::after { background: var(--bad); }
   .lamp.busy { box-shadow: 0 0 0 1px color-mix(in srgb, var(--c) 45%, transparent), 0 0 18px -2px color-mix(in srgb, var(--c) 55%, transparent); }
-  .lamp.busy::after { background: var(--c); animation: lampGlow 1.4s ease-in-out infinite; }
+  .lamp.busy::after { background: var(--ok); animation: lampGlow 1.4s ease-in-out infinite; }
   .lamp.off { opacity: .38; filter: grayscale(1); }
-  .lamp.leader { outline: 1.5px dashed color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 2px; }
-  @keyframes lampGlow { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--c) 60%, transparent); } 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--c) 0%, transparent), 0 0 10px var(--c); } }
+  .lamp.leader { outline: 1.5px solid color-mix(in srgb, var(--accent) 60%, transparent); outline-offset: 2px; }
+  .crew .lamp:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  @keyframes lampGlow { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 60%, transparent); } 50% { box-shadow: 0 0 0 5px transparent, 0 0 10px var(--ok); } }
+  @media (prefers-reduced-motion: reduce) { .crew .lamp.busy::after { animation: none; } }
 
   /* 页面 */
   .page { padding: 20px 24px 48px; gap: 16px; }
@@ -457,8 +465,10 @@
 
   header { flex-wrap: nowrap; min-width: 0; }
   #leaderBox, #modeBox { flex-wrap: nowrap; white-space: nowrap; }
-  #leaderBox select { max-width: 130px; }
+  #leaderBox select { max-width: 240px; }
+  #leaderBox option.leader-unavailable { color: var(--bad); }
   #leaderBox select.leader-missing { border: 2px solid var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 12%, transparent); }
+  #leaderBox select.leader-unverified { border: 2px solid var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 12%, transparent); }
   .wf { grid-template-rows: auto minmax(0, 1fr); }
   .wf-bar { display: block; padding: 0; overflow: visible; }
   .wf-tools { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 14px; overflow-x: auto; scrollbar-width: none; }
@@ -472,6 +482,17 @@
   .triage-note button { flex: none; font-size: 12px; }
   .triage-note .triage-state { margin-left: 8px; color: var(--muted); font-weight: normal; }
   .leader-warning { padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--bad) 55%, var(--line)); border-left: 3px solid var(--bad); border-radius: 9px; color: var(--bad); background: color-mix(in srgb, var(--bad) 7%, var(--panel)); font-size: 12px; font-weight: 600; }
+  .leader-warning.unverified { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); border-left-color: var(--warn); color: var(--warn); background: color-mix(in srgb, var(--warn) 7%, var(--panel)); }
+  .leader-warning, .run-notice, .requirement-warning { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  .leader-warning > span, .run-notice > span, .requirement-warning > span { flex: 1 1 300px; min-width: 0; }
+  .leader-warning button, .run-notice button, .requirement-warning button { flex: none; font-size: 12px; }
+  .requirement-warning { padding: 12px; border: 1px solid var(--warn); border-left: 4px solid var(--warn); border-radius: 9px; background: color-mix(in srgb, var(--warn) 12%, var(--panel)); font-size: 13px; }
+  .requirement-warning strong { color: var(--text); }
+  .requirement-warning small { display: block; margin-top: 3px; color: var(--muted); }
+  .run-notice { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--line)); border-radius: 9px; background: color-mix(in srgb, var(--warn) 7%, var(--panel)); font-size: 12px; }
+  .requirement-choice { display: grid; gap: 12px; }
+  .requirement-choice .box { display: grid; gap: 9px; margin: 0; }
+  .requirement-choice button { justify-self: start; }
   .leader-notices { display: grid; gap: 8px; }
   .leader-notices:empty { display: none; }
   .wf > #side .side { top: var(--wf-bar-height, 48px); }
@@ -479,8 +500,8 @@
   nav button { padding: 7px 0 5px; }
   .crew { gap: 6px; padding-top: 10px; }
   .lamp { width: 32px; height: 32px; font-size: 10.5px; }
-  .lamp.busy::after { background: var(--accent); animation: lampBusy 1.4s ease-in-out infinite; }
-  @keyframes lampBusy { 0%, 100% { box-shadow: 0 0 0 0 var(--accent-ring); } 50% { box-shadow: 0 0 0 5px transparent, 0 0 10px var(--accent); } }
+  .lamp.busy::after { background: var(--ok); animation: lampBusy 1.4s ease-in-out infinite; }
+  @keyframes lampBusy { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 40%, transparent); } 50% { box-shadow: 0 0 0 5px transparent, 0 0 10px var(--ok); } }
 
   header { flex-wrap: nowrap; min-width: 0; }
   #leaderBox, #modeBox { flex-wrap: nowrap; white-space: nowrap; }
@@ -489,8 +510,8 @@
   nav button { padding: 7px 0 5px; }
   .crew { gap: 6px; padding-top: 10px; }
   .lamp { width: 32px; height: 32px; font-size: 10.5px; }
-  .lamp.busy::after { background: var(--accent); animation: lampBusy 1.4s ease-in-out infinite; }
-  @keyframes lampBusy { 0%, 100% { box-shadow: 0 0 0 0 var(--accent-ring); } 50% { box-shadow: 0 0 0 5px transparent, 0 0 10px var(--accent); } }
+  .lamp.busy::after { background: var(--ok); animation: lampBusy 1.4s ease-in-out infinite; }
+  @keyframes lampBusy { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 40%, transparent); } 50% { box-shadow: 0 0 0 5px transparent, 0 0 10px var(--ok); } }
   .sk-rail { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
   .sk-rail .lbl { font: 600 9.5px/1 var(--font-mono); letter-spacing: .14em; color: var(--faint); margin-right: 2px; }
   .sk-rail.live .lbl { color: var(--accent); }
@@ -558,6 +579,37 @@
   .leader-wait-body .box { margin: 6px 0; }
   .leader-history { display: block; margin: 10px auto 0; }
   .leader-answers > summary { margin: 0 !important; }
+  /* 画布上的监督者与最近一次决策。连线使用屏幕坐标，随画布变换更新。 */
+  .wf.has-leader-console { grid-template-rows: auto auto minmax(0, 1fr); }
+  .leader-console { position: relative; z-index: 3; display: flex; align-items: center; gap: 18px; min-width: 0; padding: 12px 18px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .leader-console-person { display: flex; align-items: center; gap: 10px; flex: 0 0 248px; min-width: 0; }
+  .leader-avatar { width: 38px; height: 38px; flex: none; display: grid; place-items: center; border-radius: 12px; color: var(--c); border: 1px solid color-mix(in srgb, var(--c) 32%, var(--line)); background: color-mix(in srgb, var(--c) 10%, var(--panel)); font-weight: 750; font-size: 18px; }
+  .leader-console-identity { min-width: 0; display: grid; gap: 4px; }
+  .leader-console-name { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 12px; }
+  .leader-console-name .leader-model { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .leader-console-caption { color: var(--faint); font-size: 10px; letter-spacing: .06em; }
+  .leader-console-state { font-size: 12px; white-space: nowrap; }
+  .leader-console-decision { flex: 1; min-width: 0; display: grid; gap: 6px; }
+  .leader-console-reason { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; }
+  .leader-console-decision .leader-pills { max-width: 100%; flex-wrap: nowrap; overflow: hidden; }
+  .leader-console-actions { display: flex; gap: 6px; flex: none; align-items: center; }
+  .leader-console-actions button { font-size: 11px; padding: 5px 8px; }
+  .leader-console.collapsed { min-height: 38px; padding-top: 6px; padding-bottom: 6px; gap: 12px; }
+  .leader-console.collapsed .leader-console-person { flex: 1; }
+  .leader-console.collapsed .leader-console-identity { display: flex; gap: 12px; align-items: center; }
+  .leader-console.collapsed .leader-avatar, .leader-console.collapsed .leader-console-caption, .leader-console.collapsed .leader-model, .leader-console.collapsed .leader-console-decision, .leader-console.collapsed .leader-console-links { display: none; }
+  .leader-wires { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; overflow: hidden; }
+  .leader-wire { fill: none; stroke: var(--wire); stroke-width: 1.5; stroke-dasharray: 5 7; opacity: .32; }
+  .leader-wire.fresh { animation: leaderWireFlow 3s linear 1; }
+  @keyframes leaderWireFlow { 0% { stroke-dashoffset: 96; opacity: .85; } 75% { opacity: .65; } 100% { stroke-dashoffset: 0; opacity: .32; } }
+  .wf.has-leader-console > #side .side { top: var(--wf-top-height, 140px); z-index: 4; }
+  .component-round { position: absolute; right: 12px; top: -10px; padding: 1px 7px; border-radius: 5px; font-size: 10px; color: var(--accent); background: var(--panel); border: 1px solid var(--line); }
+  .node .sk-rail { max-width: 100%; margin-top: 7px; }
+  .node .sk-rail .lbl { flex-basis: 100%; font-size: 8px; }
+  .node .skc { min-width: 0; max-width: calc(50% - 3px); padding: 3px 5px; font-size: 10px; }
+  .skc-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 1000px) { .leader-console { gap: 10px; padding: 10px; } .leader-console-person { flex-basis: 205px; } .leader-console-name .leader-model { max-width: 105px; } }
+  @media (max-width: 720px) { .leader-console:not(.collapsed) { flex-wrap: wrap; } .leader-console-person { flex: 1; } .leader-console-decision { flex-basis: 100%; order: 3; } }
   @container leader (max-width: 800px) {
     .leader-status { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); }
     .leader-controls { grid-column: 1 / -1; justify-content: flex-start; }
@@ -645,7 +697,7 @@
   <button data-p="runs"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M4 12h16M4 18h12"/><circle cx="18" cy="6" r="2"/></svg></span>运行记录</button>
   <button data-p="schedules"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M7.5 3v4M16.5 3v4M3.5 10h17M12 13v3l2 1"/></svg></span>定时任务</button>
   <button data-p="settings"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span>设置</button>
-  <div class="crew" id="crew" title="团队指示灯：亮起呼吸 = 正在干活，绿点 = 空闲，灰 = 停用 / 未安装，虚线框 = Leader"></div>
+  <div class="crew" id="crew" title="团队认证状态：绿点 = 可用，灰点虚线框 = 未验证，红点 = 认证失效，整体灰 = 停用 / 未安装；点击去设置"></div>
 </nav>
 <main id="main"></main>
 
@@ -737,14 +789,56 @@ function workflowStarted() {
   if (typeof S?.workflowStarted === 'boolean') return S.workflowStarted;
   return !!W?.graph?.nodes.some(n => n.type !== 'start' && ['done', 'running', 'waiting'].includes(W.states?.[n.id]?.status));
 }
+function agentAvailability(a) {
+  if (a?.availability) return a.availability;
+  const login = a?.loginStatus?.status || a?.loginStatus;
+  const status = !a?.enabled ? 'disabled' : !a?.installed ? 'missing' : login === 'expired' ? 'expired' : login === 'unverified' ? 'unverified' : a.available ? 'available' : 'unverified';
+  return { status, label: { available: '可用', expired: '登录已失效', unverified: '未验证', missing: '未安装', disabled: '停用' }[status], available: status === 'available' };
+}
+function currentLeaderHealth() {
+  const health = S?.leaderHealth || W?.leaderHealth;
+  if (health) return health;
+  const agent = S?.agents?.find(a => a.id === S.leader);
+  return agent ? { ...agentAvailability(agent), id: agent.id, name: agent.name } : { available: false, status: 'missing-leader', label: '未选择', name: '' };
+}
 function leaderWarning() {
-  if (!S?.project || !['leader', 'auto'].includes(S.mode) || S.leader) return '';
-  return S.leaderWarning || W?.leaderWarning || '还没选 Leader，流程不会自动推进';
+  if (!S?.project) return '';
+  if (!S.leader) return ['leader', 'auto'].includes(S.mode) ? (S.leaderWarning || W?.leaderWarning || '没有 Leader，流程不会推进') : '';
+  const health = currentLeaderHealth();
+  if (health.status === 'unverified') return `当前 Leader（${health.name || agentName(S.leader)}）尚未验证，运行可能失败`;
+  return health.available ? '' : `当前 Leader（${health.name || agentName(S.leader)}）${health.label || '不可用'}，流程不会推进`;
+}
+function leaderWarningNotice() {
+  const warning = leaderWarning();
+  if (!warning) return '';
+  const replacement = currentLeaderHealth().replacement || S.agents.find(a => a.id !== S.leader && agentAvailability(a).available);
+  return `<div class="leader-warning${currentLeaderHealth().status === 'unverified' ? ' unverified' : ''}" role="alert"><span>${esc(warning)}</span>${replacement ? `<button onclick="selectLeader('${jsq(replacement.id)}')">换成 ${esc(replacement.name || agentName(replacement.id))}</button>` : ''}<button onclick="openLeaderSettings('${jsq(S.leader || '')}')">去设置登录</button></div>`;
+}
+const requirementChange = () => W?.requirementChanged || S?.requirementChanged;
+const workflowRunNotice = () => W?.runNotice || S?.runNotice;
+function requirementWarningNotice() {
+  if (!requirementChange()) return '';
+  return '<div class="requirement-warning" role="alert"><span><strong>需求已修改，现有产出基于旧需求</strong><small>新旧需求明显不相关时，推荐新建项目。</small></span><button class="primary" onclick="changedRequirementProjectDialog()">用新需求新建项目（推荐）</button><button onclick="rerunWorkflowDialog()">在本项目重跑</button></div>';
+}
+function runNoticeActions(notice) {
+  if (!notice || notice.code === 'requirement-changed') return '';
+  if (!W?.requirement?.trim() && notice.nodeIds?.some(id => W?.graph?.nodes.find(n => n.id === id)?.type === 'start')) return '<button class="primary" onclick="goToWorkflowConfirmation()">填写需求</button>';
+  if (/waiting|confirmation/.test(notice.code || '') || notice.nodeIds?.some(id => W?.states?.[id]?.status === 'waiting')) return '<button class="primary" onclick="goToWorkflowConfirmation()">去确认</button>';
+  if (/leader/.test(notice.code || '')) return leaderWarning() ? '' : '<button onclick="openLeaderSettings()">去设置 Leader</button>';
+  if (notice.code === 'blocked' && S?.leaderBoard?.error) return '<button class="primary" onclick="goPage(\'leader\')">查看 Leader 并继续</button>';
+  if (notice.code === 'blocked' && notice.nodeIds?.some(id => W?.graph?.nodes.find(n => n.id === id)?.type === 'dev' && W?.states?.[id]?.status === 'running')) return '<button class="primary" onclick="goPage(\'board\')">打开看板派发任务</button>';
+  return '<button onclick="rerunWorkflowDialog()">在本项目重跑</button><button onclick="newProjectDialog({requirement:W?.requirement || \'\',name:requirementProjectName()})">新建项目</button>';
+}
+function runWarningNotice() {
+  const notice = workflowRunNotice();
+  if (!notice || notice.code === 'requirement-changed') return '';
+  return `<div class="run-notice" role="status"><span>${esc(notice.message || '当前没有可以开始的步骤')}</span>${runNoticeActions(notice)}</div>`;
 }
 function workflowNotices() {
-  if (fixedRecipeMode()) return `<div class="triage-note" role="status">${esc(fixedRecipeHint)}</div>`;
-  if (componentMode()) { const warning = leaderWarning(); return warning ? `<div class="leader-warning" role="alert">${esc(warning)}；请在顶栏选择可用的 Leader。</div>` : ''; }
-  const warning = leaderWarning(), t = W?.triage || S?.triage, pending = triagePending(), canApply = !workflowStarted() && !pending;
+  const notices = requirementWarningNotice() + leaderWarningNotice() + runWarningNotice();
+  if (fixedRecipeMode()) return notices + `<div class="triage-note" role="status">${esc(fixedRecipeHint)}</div>`;
+  if (componentMode()) return notices;
+  const t = W?.triage || S?.triage, pending = triagePending(), canApply = !workflowStarted() && !pending;
   let triage = '';
   if (pending) triage = '<div class="triage-note" role="status"><span class="pulse">●</span><span>正在分诊需求，完成后会显示推荐流程…</span></div>';
   else if (t) {
@@ -755,7 +849,7 @@ function workflowNotices() {
     const bmad = (applied || t.template) !== 'bmad-standard' ? `<button ${canApply ? '' : 'disabled'} title="${canApply ? '改用完整的需求、架构与 Story 流程' : '工作流开始后不能更换模板'}" onclick="applyTriage('bmad-standard')">改用 BMAD 标准流程</button>` : '';
     triage = `<div class="triage-note"><span class="triage-copy"><b>${esc(by)}：${esc(TRIAGE_SIZE[t.size] || t.size)} → ${esc(TRIAGE_TEMPLATE[t.template] || t.template)}</b>${t.reason ? `（${resultCopy(t.reason)}）` : ''}<span class="triage-state">${status}</span></span>${apply}${bmad}</div>`;
   }
-  return `${warning ? `<div class="leader-warning" role="alert">${esc(warning)}；请在顶栏选择可用的 Leader。</div>` : ''}${triage}`;
+  return notices + triage;
 }
 function notifyLeaderSelection() {
   const event = S?.leaderAutoSelection;
@@ -817,12 +911,14 @@ function renderTop() {
   $('modeBox').style.display = S.project ? '' : 'none';
   for (const b of $('modeSeg').children) b.classList.toggle('on', b.dataset.m === (S.mode || 'manual'));
   if (S.project) {
-    $('leader').innerHTML = '<option value="">— 选择 —</option>' + S.agents.map(a => `<option value="${a.id}" title="${esc(a.effectiveModel || 'CLI 默认模型')}" ${a.available ? '' : 'disabled'} ${S.leader === a.id ? 'selected' : ''}>${esc(a.name)}${a.effectiveModel ? ' · ' + esc(a.effectiveModel) : ''}${a.available ? '' : '（不可用）'}</option>`).join('');
+    $('leader').innerHTML = '<option value="">— 选择 —</option>' + S.agents.map(a => { const availability = agentAvailability(a), disabled = ['missing', 'disabled'].includes(availability.status), unverified = availability.status === 'unverified'; return `<option value="${esc(a.id)}" class="${availability.available || unverified ? '' : 'leader-unavailable'}" ${availability.available ? '' : `style="color:var(--${unverified ? 'warn' : 'bad'})"`} title="${esc(`${a.name} · ${availability.label} · ${a.effectiveModel || 'CLI 默认模型'}`)}" ${disabled ? 'disabled' : ''} ${S.leader === a.id ? 'selected' : ''}>${esc(a.name)} · ${esc(availability.label || '未验证')}${a.effectiveModel ? ' · ' + esc(a.effectiveModel) : ''}</option>`; }).join('');
     $('leaderSkills').innerHTML = `${SKILL_ICON}<span>${(S.leaderSkills || []).length || '技能'}</span>`;
   }
   const warning = leaderWarning();
-  $('leader').classList.toggle('leader-missing', !!warning);
-  $('leader').setAttribute('aria-invalid', warning ? 'true' : 'false');
+  const unverifiedLeader = !!S.leader && currentLeaderHealth().status === 'unverified';
+  $('leader').classList.toggle('leader-missing', !!warning && !unverifiedLeader);
+  $('leader').classList.toggle('leader-unverified', !!warning && unverifiedLeader);
+  $('leader').setAttribute('aria-invalid', warning && !unverifiedLeader ? 'true' : 'false');
   $('leader').title = warning || '选择当前项目的 Leader';
   for (const b of $('nav').children) b.classList.toggle('on', b.dataset.p === page);
   renderCrew();
@@ -832,19 +928,25 @@ function renderTop() {
 }
 const SKILL_ICON = document.querySelector('nav [data-p="skills"] svg').outerHTML;
 const CREW_ABBR = { claude: 'CL', codex: 'CX', gemini: 'GM', grok: 'GK', deepseek: 'DS' };
-// 团队指示灯：每个 agent 一盏灯，干活时呼吸发光
+// CREW：认证决定灯色；只有可用且正在运行的 agent 呼吸发光。
 function renderCrew() {
   const el = $('crew'); if (!el || !S) return;
   el.innerHTML = '<span class="lbl">CREW</span>' + S.agents.map(a => {
-    const runs = allRuns().filter(r => r.agent === a.id && r.status === 'running' && r.kind !== 'tick');
+    const availability = agentAvailability(a), status = availability.status;
+    const off = ['missing', 'disabled'].includes(status);
+    const available = !off && availability.available;
+    const runs = allRuns().filter(r => r.agent === a.id && r.status === 'running');
     const external = devtasks().filter(r => r.agent === a.id && r.status === 'running');
-    const off = !a.available && !runs.length;
-    const st = off ? (a.installed ? '已停用' : '未安装') : runs.length ? `干活中 ×${runs.length}` : '空闲';
-    const cls = [off ? 'off' : runs.length ? 'busy' : 'idle', S.leader === a.id ? 'leader' : ''].join(' ');
+    const stateClass = off ? 'off' : available ? 'available' : status === 'unverified' ? 'unverified' : 'invalid';
+    const st = !off && !available && a.auth?.mode === 'provider' && status !== 'unverified'
+      ? a.authError || '服务商 Key 缺失或认证失效'
+      : availability.label || '未验证';
+    const cls = [stateClass, available && runs.length ? 'busy' : '', S.leader === a.id ? 'leader' : ''].filter(Boolean).join(' ');
     const tip = `${a.name}${S.leader === a.id ? '（Leader）' : ''}
 模型：${a.effectiveModel || '默认'}
-状态：${st}${external.map(r => `\n面板任务：${r.title || r.id}`).join('')}`;
-    return `<span class="lamp ${cls}" style="--c:var(--${a.id}, var(--accent))" title="${esc(tip)}">${CREW_ABBR[a.id] || esc(a.id.slice(0, 2).toUpperCase())}</span>`;
+状态：${st}${runs.length ? ` · 干活中 ×${runs.length}` : available ? ' · 空闲' : ''}${external.map(r => `\n面板任务：${r.title || r.id}`).join('')}
+去设置`;
+    return `<button type="button" class="lamp ${cls}" data-agent="${esc(a.id)}" data-availability="${esc(status)}" style="--c:var(--${a.id}, var(--accent))" title="${esc(tip)}" aria-label="${esc(tip)}" onclick="event.stopPropagation();openLeaderSettings('${jsq(a.id)}')">${CREW_ABBR[a.id] || esc(a.id.slice(0, 2).toUpperCase())}</button>`;
   }).join('');
   const count = scheduledRunningCount();
   if (count) el.innerHTML += `<button class="schedule-lamp pulse" title="${count} 条定时任务运行中" onclick="goPage('schedules')">◷ ${count}</button>`;
@@ -1001,15 +1103,18 @@ function renderWorkflow() {
   if (!componentGraphMode()) loadTimeline().then(() => { if (S.project !== project || page !== 'workflow' || wfView !== 'canvas') return; drawNodes(); renderWfBar(); if (selStory || (sel && nodeById(sel)?.type === 'dev')) renderSide(); });
   let saved = null; try { saved = JSON.parse(localStorage.getItem('view:' + S.project)); } catch {}
   if (saved) view = saved; else setTimeout(() => fitView(), 30);
-  $('main').innerHTML = `<div class="wf">
+  $('main').innerHTML = `<div class="wf has-leader-console">
     <div class="wf-bar" id="wfBar"></div>
+    <section class="leader-console" id="leaderConsole" aria-label="Leader 指挥台"></section>
+    <svg class="leader-wires" id="leaderWires" aria-hidden="true"></svg>
     <div class="canvas" id="canvas"><div class="world" id="world"><svg class="edges" id="edges"></svg><div id="nodes"></div><div id="devLanes"></div></div>
       <div class="zoom"><button onclick="zoomBy(1.2)">＋</button><button onclick="zoomBy(1/1.2)">－</button><button onclick="fitView()">适应</button></div></div>
     <div id="side"></div></div>`;
-  renderWfBar(); applyView(); drawNodes(); drawEdges(); renderSide(); bindCanvas();
+  renderWfBar(); applyView(); drawNodes(); drawEdges(); renderSide(); bindCanvas(); observeLeaderCanvas();
 }
 function renderWfBar() {
   if (!$('wfBar')) return;
+  renderLeaderConsole();
   if (componentMode()) return renderComponentBar();
   const total = W.graph.nodes.length, done = W.graph.nodes.filter(n => nst(n.id).status === 'done').length;
   const waiting = W.graph.nodes.filter(n => nst(n.id).status === 'waiting').length;
@@ -1023,7 +1128,12 @@ function renderWfBar() {
     ${W.running ? '<button onclick="api(\'/api/workflow/stop\',{}).then(refresh)">停止</button>' : `<button class="primary" ${triagePending() ? 'disabled' : ''} onclick="runWorkflow()">▶ 运行</button>`}</div><div class="wf-notices">${workflowNotices()}</div>`;
   syncWfBarHeight();
 }
-function syncWfBarHeight() { const bar = $('wfBar'); if (bar) bar.parentElement.style.setProperty('--wf-bar-height', `${bar.offsetHeight}px`); }
+function syncWfBarHeight() {
+  const bar = $('wfBar'); if (!bar) return;
+  bar.parentElement.style.setProperty('--wf-bar-height', `${bar.offsetHeight}px`);
+  bar.parentElement.style.setProperty('--wf-top-height', `${bar.offsetHeight + ($('leaderConsole')?.offsetHeight || 0)}px`);
+  scheduleLeaderConnections();
+}
 function orchestrationSwitch() { return `<select aria-label="编排模式" ${workflowStarted() || triagePending() ? 'disabled' : ''} title="${workflowStarted() ? '工作流开始后不能切换编排模式' : '选择组件自主编排或模板流程'}" onchange="setOrchestration(this.value)"><option value="components" ${componentMode() ? 'selected' : ''}>组件自主编排</option><option value="template" ${componentMode() ? '' : 'selected'}>模板流程</option></select>`; }
 window.setOrchestration = async orchestration => { if (workflowStarted() || triagePending()) return; await saveGraphNow(); await api('/api/orchestration', { orchestration }); sel = null; selEdge = null; selStory = null; graphDirty = false; wfView = 'canvas'; localStorage.setItem('wfView', wfView); await load(); toast(orchestration === 'components' ? '已切到组件自主编排' : '已切到模板流程', 'ok'); };
 function renderComponentBar() {
@@ -1032,7 +1142,41 @@ function renderComponentBar() {
   syncWfBarHeight();
 }
 window.addEventListener('resize', syncWfBarHeight);
-window.runWorkflow = async () => { await saveGraphNow(); await api('/api/workflow/run', {}); refresh(); };
+window.runWorkflow = async () => {
+  await saveGraphNow();
+  if (requirementChange()) return requirementChoiceDialog();
+  const result = await api('/api/workflow/run', {});
+  await refresh();
+  const notice = result.runNotice || workflowRunNotice();
+  if (notice?.code === 'requirement-changed' || requirementChange()) return requirementChoiceDialog();
+  if (notice) toast(notice.message || '当前没有可以开始的步骤');
+};
+function requirementProjectName() {
+  return String(requirementChange()?.newRequirement || W?.requirement || '').replace(/[\\/:*?"<>|\r\n]+/g, ' ').trim().slice(0, 24) || '新需求项目';
+}
+window.requirementChoiceDialog = () => dialog('需求已修改，选择如何继续', `<div class="requirement-choice"><p style="margin:0">现有产出基于旧需求。请选择新建项目，或在本项目按新需求重跑。</p><div class="box"><b>用新需求新建项目 <span class="chip ok">推荐</span></b><span class="small muted">适合新旧需求明显无关。自动带入新需求，由 Leader 按默认组件编排开跑。</span><button class="primary" onclick="changedRequirementProjectDialog()">用新需求新建项目</button></div><div class="box"><b>在本项目重跑</b><span class="small muted">保留产出文件，重新规划和开发，并要求 agent 按新需求改写旧文档。</span><button onclick="applyRequirementAction('rerun',this)">在本项目重跑</button></div></div>`, true);
+window.changedRequirementProjectDialog = () => dialog('用新需求新建项目', `<div class="form"><label>项目名<input id="changedProjectName" maxlength="80" value="${esc(requirementProjectName())}"></label><label>带入的新需求<textarea rows="5" readonly>${esc(requirementChange()?.newRequirement || W?.requirement || '')}</textarea></label><p class="small muted" style="margin:0">项目放在 ${esc(S.projectsRoot)}，使用组件自主编排并自动开跑。</p><div class="row"><button onclick="requirementChoiceDialog()">返回</button><span class="grow"></span><button class="primary" onclick="applyRequirementAction('new-project',this)">创建并运行</button></div></div>`, true);
+window.rerunWorkflowDialog = () => dialog('在本项目重跑', `<div class="form"><p style="margin:0">${requirementChange() ? '将按新需求重新规划和开发，并告诉 agent 改写旧文档。' : '将重置工作流的完成状态，从头运行当前需求。'}产出文件会保留。</p><div class="row"><button onclick="$('dlg').close()">取消</button><span class="grow"></span><button class="primary" onclick="applyRequirementAction('rerun',this)">确认重跑</button></div></div>`, true);
+window.applyRequirementAction = async (action, button) => {
+  const name = $('changedProjectName')?.value.trim();
+  if (action === 'new-project' && !name) return toast('请输入项目名');
+  if (button) button.disabled = true;
+  try {
+    await saveGraphNow();
+    const result = await api('/api/workflow/requirement-action', { action, ...(action === 'new-project' ? { name } : {}) });
+    $('dlg').close(); sel = null; selEdge = null; selStory = null; graphDirty = false; page = 'workflow'; wfView = 'canvas'; localStorage.setItem('page', page); localStorage.setItem('wfView', wfView);
+    await load();
+    const notice = result.runNotice || workflowRunNotice();
+    toast(notice && notice.code !== 'requirement-changed' ? notice.message : action === 'new-project' ? '新项目已创建并开始运行' : '已重置工作流，开始按当前需求重跑', notice ? 'bad' : 'ok');
+  } finally { if (button?.isConnected) button.disabled = false; }
+};
+window.goToWorkflowConfirmation = () => {
+  if (S.leaderBoard?.ask && !S.leaderBoard.ask.answered) return goPage('leader');
+  const notice = workflowRunNotice(), id = notice?.nodeIds?.find(id => W?.states?.[id]?.status === 'waiting') || Object.keys(W?.states || {}).find(id => W.states[id].status === 'waiting') || notice?.nodeIds?.[0];
+  if (componentGraphMode() && id) return selectComponent(id);
+  page = 'workflow'; wfView = 'canvas'; sel = id || null; selStory = null; selEdge = null; localStorage.setItem('page', page); localStorage.setItem('wfView', wfView); renderTop(); renderWorkflow();
+  if (id) { const node = nodeById(id), cv = $('canvas'); if (node && cv) { view.x = Math.min(100, cv.clientWidth / 2 - 300) - node.x * view.k; view.y = cv.clientHeight / 2 - (node.y + 80) * view.k; applyView(); } }
+};
 window.applyTemplate = async file => { if (!file) return; if (workflowStarted() || triagePending()) return toast('工作流已开始或正在分诊，暂时不能更换模板'); if (!confirm('用模板替换当前工作流？已完成的产出文档不会删除。')) return; await saveGraphNow(); if (componentMode()) await api('/api/orchestration', { orchestration: 'template' }); await api('/api/workflow/template', { file }); sel = null; selEdge = null; selStory = null; await load(); };
 window.applyTriage = async template => {
   if (workflowStarted() || triagePending()) return toast('工作流已开始或正在分诊，暂时不能更换模板');
@@ -1042,7 +1186,7 @@ window.applyTriage = async template => {
   await load();
   toast(template === 'bmad-standard' ? '已改用 BMAD 标准流程' : '已应用推荐流程', 'ok');
 };
-function applyView() { const w = $('world'); if (w) w.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.k})`; localStorage.setItem('view:' + S.project, JSON.stringify(view)); }
+function applyView() { const w = $('world'); if (w) w.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.k})`; localStorage.setItem('view:' + S.project, JSON.stringify(view)); scheduleLeaderConnections(); }
 window.zoomBy = f => { const c = $('canvas').getBoundingClientRect(); zoomAt(c.width / 2, c.height / 2, f); };
 function zoomAt(cx, cy, f) { const k = Math.min(2, Math.max(.08, view.k * f)); view.x = cx - (cx - view.x) * k / view.k; view.y = cy - (cy - view.y) * k / view.k; view.k = k; applyView(); }
 window.fitView = () => {
@@ -1229,25 +1373,38 @@ function layoutComponents() {
   const level = id => { if (levels.has(id)) return levels.get(id); if (visiting.has(id)) return 1; visiting.add(id); const parents = (W.graph.edges || []).filter(e => e.to === id && byId.has(e.from)); const l = parents.length ? Math.max(...parents.map(e => level(e.from))) + 1 : byId.get(id)?.type === 'start' ? 0 : 1; visiting.delete(id); levels.set(id, l); return l; };
   nodes.forEach(n => level(n.id));
   const groups = new Map(); for (const n of nodes) { const l = levels.get(n.id); if (!groups.has(l)) groups.set(l, []); groups.get(l).push(n); }
-  const tallest = Math.max(1, ...Array.from(groups.values(), g => g.length));
-  for (const [l, group] of groups) group.forEach((n, i) => { n.x = 40 + l * 330; n.y = 45 + (tallest - group.length) * 105 + i * 210; });
+  const tallest = Math.max(1, ...Array.from(groups.values(), g => g.length)), rowHeight = Math.max(300, ...nodes.map(n => graphNodeHeight(n) + 40));
+  for (const [l, group] of groups) group.forEach((n, i) => { n.x = 40 + l * 330; n.y = 45 + (tallest - group.length) * rowHeight / 2 + i * rowHeight; });
 }
 function componentRun(c) { return (S.runs || []).find(r => r.id === c.runId) || (S.runs || []).find(r => r.callId === c.id || r.nodeId === c.id); }
 function componentWho(c) { const info = componentInfo(c.component); return info.executor === 'human' ? '老板' : info.executor === 'panel' ? '面板' : c.component === 'compare' && c.inputs?.agents?.length ? c.inputs.agents.map(agentName).join(' + ') : agentName(c.agent || S.leader); }
 function componentModel(c) { if (['human', 'panel'].includes(componentInfo(c.component).executor)) return ''; if (c.component === 'compare') return [...new Set((c.runs?.length ? c.runs.map(r => r.model) : (c.inputs?.agents || []).map(id => S.agents.find(a => a.id === id)?.effectiveModel)).filter(Boolean))].join(' / '); return c.model || componentRun(c)?.model || S.agents.find(a => a.id === (c.agent || S.leader))?.effectiveModel || ''; }
 function componentJson(value) { return `<pre class="component-json">${esc(JSON.stringify(displayResult(value), null, 2))}</pre>`; }
 function componentArtifacts(result) { return (result?.artifacts || []).map(a => typeof a === 'string' ? a : a.path || a.file || '').filter(Boolean); }
+function componentRound(call) {
+  if (call?.leaderTick) return { number: call.leaderTick, why: call.leaderWhy || call.why || '' };
+  const log = S.leaderBoard?.log || [], i = log.findIndex(t => (t.actions || []).some(a => a.type === 'call' && a.id === call?.id && (!a.outcome || a.outcome === 'ok')));
+  return i < 0 ? null : { number: log[i].tick || Math.max(1, (S.leaderBoard.ticks || log.length) - i), why: log[i].progress?.reason || call.why || '' };
+}
+function componentSkillRail(call) {
+  const sources = [['Leader 选的', call.skills || []], ['组件默认', call.componentSkills || []], ['系统推荐', call.autoSkills || []], ['Leader 默认', call.leaderSkills || []]];
+  return skillRail('component|' + S.project + '|' + call.id, call.effectiveSkills || sources.flatMap(([, ids]) => ids), call.status === 'running', [...(call.componentSkills || []), ...(call.autoSkills || [])], sources);
+}
+function nodeSkillRail(n) {
+  const c = n.config || {}, leader = !c.agent || c.agent === 'leader', sources = [['节点配置选的', c.skills || []], ['Leader 默认', leader ? S.leaderSkills || [] : []], ['系统推荐', c.autoSkills || []]];
+  return skillRail('node|' + S.project + '|' + n.id, sources.flatMap(([, ids]) => ids), nst(n.id).status === 'running', c.autoSkills || [], sources);
+}
 function drawComponentNodes(box) {
   layoutComponents(); const now = Date.now();
   box.innerHTML = W.graph.nodes.map(n => {
     const call = componentCall(n), s = nst(n.id), [label, cls] = NODE_ST[s.status] || [s.status, ''], key = S.project + '|' + n.id;
     if (!COMPONENT_SEEN.has(key)) COMPONENT_SEEN.set(key, now);
-    const age = now - COMPONENT_SEEN.get(key), fresh = n.type === 'component' && age < 360;
+    const age = now - COMPONENT_SEEN.get(key), fresh = n.type === 'component' && age < 360, round = componentRound(call);
     let body = n.type === 'start' ? `<div class="component-why">${resultCopy(W.requirement || '点开填写需求')}</div>` : n.type === 'end' ? '<div class="ln">交付完成</div>' : '';
     if (call) body = `<div class="component-why" title="${esc(resultText(call.why || ''))}">${resultCopy(call.why || '按需求执行')}</div><div class="ln" style="color:${color(call.agent || S.leader)}">${esc(componentWho(call))}${call.depth ? ` · ${esc(call.depth)}` : ''}</div><div class="ln" title="${esc(componentModel(call))}">${esc(componentModel(call) || (componentInfo(call.component).executor === 'agent' ? '默认模型' : ''))}</div><div class="ln">${componentElapsed(call)}${call.status === 'pending' && call.depends_on?.length ? ` · 等待 ${call.depends_on.length} 个依赖` : ''}</div>${call.error ? `<div class="ln" style="color:var(--bad)" title="${esc(resultText(call.error))}">${resultCopy(call.error)}</div>` : ''}`;
-    return `<div class="node component s-${esc(s.status)} ${sel === n.id ? 'sel' : ''} ${fresh ? 'fresh' : ''}" data-id="${esc(n.id)}" style="left:${n.x}px;top:${n.y}px;animation-delay:${-age}ms,0ms;--tc:var(--t-${n.type},var(--accent))">${n.type !== 'start' ? '<span class="h in"></span>' : ''}${n.type !== 'end' ? '<span class="h out"></span>' : ''}<div class="nh"><span class="ic">${TYPES[n.type]?.[1] || '✦'}</span><span class="tt" title="${esc(n.title || call?.name || '')}">${esc(n.title || call?.name || componentInfo(call?.component).name || '组件')}</span><span class="chip ${cls}">${s.status === 'running' ? '<span class="pulse">' + esc(label) + '</span>' : esc(label)}</span></div><div class="nb">${body}</div></div>`;
+    return `<div class="node component s-${esc(s.status)} ${sel === n.id ? 'sel' : ''} ${fresh ? 'fresh' : ''}" data-id="${esc(n.id)}" style="left:${n.x}px;top:${n.y}px;animation-delay:${-age}ms,0ms;--tc:var(--t-${n.type},var(--accent))">${round ? `<span class="component-round" title="${esc(leaderText(round.why))}">第 ${round.number} 轮</span>` : ''}${n.type !== 'start' ? '<span class="h in"></span>' : ''}${n.type !== 'end' ? '<span class="h out"></span>' : ''}<div class="nh"><span class="ic">${TYPES[n.type]?.[1] || '✦'}</span><span class="tt" title="${esc(n.title || call?.name || '')}">${esc(n.title || call?.name || componentInfo(call?.component).name || '组件')}</span><span class="chip ${cls}">${s.status === 'running' ? '<span class="pulse">' + esc(label) + '</span>' : esc(label)}</span></div><div class="nb">${body}${call ? componentSkillRail(call) : ''}</div></div>`;
   }).join('');
-  tick();
+  tick(); scheduleLeaderConnections();
 }
 function renderComponentFlow(box) {
   const scroll = box.scrollTop, calls = componentCalls();
@@ -1272,12 +1429,13 @@ function drawNodes() {
     if (s.status === 'running') body += `<div class="ln liveline" data-live="${s.runId || ''}">${esc(s.lastLine || '运行中…')}</div>${s.startedAt ? `<div class="ln">已运行 <span data-since="${s.startedAt}"></span></div>` : ''}`;
     if (s.status === 'waiting') body += `<div class="ln" style="color:var(--warn)">${resultCopy(s.note || '点开确认')}</div>`;
     if (s.status === 'failed' && s.note) body += `<div class="ln" style="color:var(--bad)">${resultCopy(s.note)}</div>`;
+    if (n.type === 'agent') body += nodeSkillRail(n);
     return `<div class="node s-${s.status} ${sel === n.id ? 'sel' : ''}" data-id="${n.id}" style="left:${n.x}px;top:${n.y}px;--tc:var(--t-${n.type})">
       ${n.type !== 'start' ? '<span class="h in" data-in="' + n.id + '"></span>' : ''}${n.type !== 'end' ? '<span class="h out" data-out="' + n.id + '"></span>' : ''}
       <div class="nh"><span class="ic">${ti}</span><span class="tt">${esc(n.title || tl)}</span>${s.stale ? '<span class="chip warn" title="上游重新确认过">上游已更新</span>' : ''}<span class="chip ${stc}">${s.status === 'running' ? '<span class="pulse">' + stl + '</span>' : stl}</span></div>
       <div class="nb">${body}</div></div>`;
   }).join('');
-  drawDevLanes(); tick();
+  drawDevLanes(); tick(); scheduleLeaderConnections();
 }
 function portPos(id, side) { const n = nodeById(id); return n ? { x: n.x + (side === 'out' ? 230 : 0), y: n.y + 26 } : { x: 0, y: 0 }; }
 const curve = (a, b) => { const dx = Math.max(40, Math.abs(b.x - a.x) / 2); return `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`; };
@@ -1287,6 +1445,7 @@ function drawEdges(temp) {
     const d = curve(portPos(e.from, 'out'), portPos(e.to, 'in')), live = nst(e.to).status === 'running' && nst(e.from).status === 'done';
     return `<path class="e ${selEdge === i ? 'sel' : ''} ${live ? 'live' : ''}" d="${d}"/><path class="hit" data-edge="${i}" d="${d}"/>`;
   }).join('') + (temp ? `<path class="e sel" d="${curve(temp.a, temp.b)}"/>` : '');
+  scheduleLeaderConnections();
 }
 function toWorld(ev) { const r = $('canvas').getBoundingClientRect(); return { x: (ev.clientX - r.left - view.x) / view.k, y: (ev.clientY - r.top - view.y) / view.k }; }
 function bindCanvas() {
@@ -1408,6 +1567,10 @@ function renderComponentSide(box, n) {
     const result = call.result, info = componentInfo(call.component), run = componentRun(call), files = componentArtifacts(result), findings = result?.findings || [], questions = result?.open_questions || [];
     box.innerHTML = `<div class="side"><div class="sh"><b class="grow">${esc(call.name || info.name)}</b><button class="ghost" onclick="sel=null;drawNodes();renderSide()">✕</button></div><div class="sb"><div class="row"><span class="chip ${cls}">${esc(status)}</span><span class="muted small">${esc(call.id)}</span><span class="grow"></span><span class="small">${componentElapsed(call)}</span></div><div class="field"><span>为什么调用</span><div class="component-summary">${resultCopy(call.why || '按需求执行')}</div></div><div class="field"><span>执行者 / 模型</span><b style="color:${color(call.agent || S.leader)}">${esc(componentWho(call))}</b><div class="small muted">${esc(componentModel(call) || '—')}${call.depth ? ' · 深度 ' + esc(call.depth) : ''}</div><div class="small muted">${esc(componentEstimate(info))}</div></div><div class="field"><span>依赖</span><div class="row">${(call.depends_on || []).map(id => `<button class="link" onclick="selectComponent('${jsq(id)}')">${esc(id)} · ${esc(NODE_ST[componentCalls().find(c => c.id === id)?.status]?.[0] || '未找到')}</button>`).join('') || '<span class="small muted">无前置依赖</span>'}</div></div><div class="field"><span>输入</span>${componentJson(call.inputs || {})}</div>${call.error ? `<div class="box component-summary" style="color:var(--bad)">${resultCopy(call.error)}</div>` : ''}${result ? `<div class="field"><span>结果摘要${typeof result.pass === 'boolean' ? ` · ${result.pass ? '✓ 通过' : '✗ 未通过'}` : ''}</span><div class="component-summary">${resultCopy(result.summary || '暂无摘要')}</div></div><div class="field"><span>产出文件 · ${files.length}</span><div class="component-files">${files.map(path => isBrokenText(path) ? resultCopy(path) : `<button class="link" onclick="openComponentArtifact('${jsq(path)}')">▤ ${esc(path)}</button>`).join('') || '<span class="small muted">无文件产出</span>'}</div></div>${findings.length ? `<div class="field"><span>发现的问题 / 结论</span><ul style="margin:0;padding-left:20px">${findings.map(f => `<li class="component-summary">${typeof f === 'string' ? resultCopy(f) : resultCopy(JSON.stringify(displayResult(f), null, 2))}</li>`).join('')}</ul></div>` : ''}${result.tasks?.length ? `<div class="field"><span>拆分任务 · ${result.tasks.length}</span><button onclick="goPage('board')">打开任务看板</button>${componentJson(result.tasks)}</div>` : ''}${questions.length ? `<div class="field"><span>需要澄清</span>${componentJson(questions)}</div>` : ''}` : '<div class="small muted">执行结束后，这里会显示结果和产出。</div>'}${call.status === 'waiting' ? `<div class="box"><div class="component-summary">${resultCopy(S.leaderBoard?.ask?.q || '请回答澄清问题')}</div><button onclick="goPage('leader')">回答 Leader</button></div>` : ''}<div class="row">${run ? `<button class="primary" onclick="openTerm('${jsq(run.id)}')">打开执行终端</button><button onclick="openLog('${jsq(run.id)}','任务')">查看任务与结果</button>` : '<span class="small muted">暂无执行日志</span>'}${['running', 'queued'].includes(call.status) && run ? `<button class="bad" onclick="cancelRun('${jsq(run.id)}')">取消</button>` : ''}${!fixedRecipeMode() && S.mode === 'manual' && call.status === 'failed' ? `<button onclick="componentDialog('${jsq(call.component)}','${jsq(call.id)}')">新建调用重做</button>` : ''}</div></div></div>`;
   }
+  if (call) {
+    const round = componentRound(call), skills = componentSkillRail(call);
+    if (skills || round) box.querySelector('.sb').insertAdjacentHTML('afterbegin', `<div class="field">${round ? `<span title="${esc(leaderText(round.why))}">Leader 第 ${round.number} 轮决定</span>` : ''}<span>携带技能</span>${skills || '<span class="small muted">未携带技能</span>'}</div>`);
+  }
   if (call?.component === 'compare' && call.runs?.length) box.querySelector('.sb').insertAdjacentHTML('beforeend', `<div class="field"><span>方案执行记录 · ${call.runs.length}</span>${call.runs.map(r => `<div class="box"><div class="row"><b style="color:${color(r.agent)}">${esc(agentName(r.agent))}</b><span class="chip">${esc(r.variant || '执行')}</span><span class="small muted">${esc(RUN_ST[r.status] || r.status)}</span></div><div class="small muted component-summary">${esc(r.model || '默认模型')}</div><div class="row" style="margin-top:6px"><button class="link" onclick="openTerm('${jsq(r.id)}')">打开执行终端</button><button class="link" onclick="openLog('${jsq(r.id)}','结果')">查看结果</button></div></div>`).join('')}</div>`);
   if (call?.status === 'waiting' && S.leaderBoard?.ask && !S.leaderBoard.ask.answered) {
     box.querySelector('button[onclick="goPage(\'leader\')"]')?.remove();
@@ -1460,6 +1623,7 @@ function renderSide() {
   box.innerHTML = `<div class="side"><div class="sh" style="--tc:var(--t-${n.type})"><span class="ic" style="width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:#fff;background:var(--tc)">${ti}</span>
       <b class="grow">${esc(n.title || tl)}</b><button class="ghost bad" title="删除节点" onclick="deleteNode('${n.id}')">删除</button><button class="ghost" onclick="sel=null;drawNodes();renderSide()">✕</button></div>
     <div class="sb"><div id="runBox"></div>${form}</div></div>`;
+  if (n.type === 'agent') box.querySelector('.sb').insertAdjacentHTML('beforeend', '<div class="field"><span>本节点携带的完整技能</span><div id="nodeSkillRail"></div></div>');
   renderRunBox();
 }
 function skillChips(ids) { return ids.length ? ids.map(id => `<span class="chip" title="${esc(id)}">🧩 ${esc(id.split(':').pop())}</span>`).join('') : '<span class="small muted">没选技能</span>'; }
@@ -1469,6 +1633,7 @@ window.setCfg = (k, v) => { if (rejectFixedRecipeEdit()) return; const n = nodeB
 window.saveRequirement = async () => { await api('/api/requirement', { text: $('reqText').value }); toast('需求已保存', 'ok'); W.requirement = $('reqText').value; refresh(); };
 function renderRunBox() {
   const box = $('runBox'), n = sel && nodeById(sel); if (!box || !n) return;
+  if ($('nodeSkillRail')) $('nodeSkillRail').innerHTML = nodeSkillRail(n) || '<span class="small muted">未携带技能</span>';
   const s = nst(n.id), [stl, stc] = NODE_ST[s.status] || ['', ''], res = s.result;
   let h = `<div class="row"><b>状态</b><span class="chip ${stc}">${stl}</span>${s.derived ? '<span class="small muted">（已有产出，自动识别）</span>' : ''}${s.stale ? '<span class="chip warn">上游已更新</span>' : ''}<span class="grow"></span>
     ${s.runId ? `<button class="link" onclick="openLog('${s.runId}')">日志</button>` : ''}</div>`;
@@ -1597,16 +1762,17 @@ const planFor = key => S.plan && ((S.plan.assignments || []).find(a => a.key ===
 const pendingDeps = key => { const p = planFor(key); return p && p.depends_on ? p.depends_on.filter(k => (S.stories.find(s => s.key === storyKeyFor(k)) || {}).status !== 'done') : []; };
 // 技能条：第一次出现的技能逐个“装入”（跨重绘保持进度，不会重播）；live = 正在用这些技能干活
 const SK_SEEN = new Map();
-const skName = id => String(id).replace(/^[\w-]+:/, '');
-function skillRail(key, list, live = false, auto = []) {
+const skName = id => String(id).split(':').at(-1);
+function skillRail(key, list, live = false, auto = [], sources = null) {
   if (!list || !list.length) return '';
   list = list.filter((id, i) => list.findIndex(x => skName(x) === skName(id)) === i); // project:x 和 x 算同一个
   const t = Date.now();
   return `<div class="sk-rail ${live ? 'live' : ''}"><span class="lbl">${live ? 'LOADED' : 'SKILLS'}</span>${list.map((id, i) => {
     const k = key + '|' + id; if (!SK_SEEN.has(k)) SK_SEEN.set(k, t);
     const age = t - SK_SEEN.get(k), anim = age < 1600 + i * 90;
-    const isAuto = auto.some(x => skName(x) === skName(id));
-    return `<span class="skc ${live ? 'on' : ''} ${anim ? 'new' : ''} ${isAuto ? 'auto' : ''}" style="--d:${i * 90 - age}ms" title="${esc(id)}${isAuto ? '（系统推荐，自动带上）' : '（Leader 选的）'}">${esc(skName(id))}</span>`;
+    const from = sources?.filter(([, ids]) => ids.some(x => skName(x) === skName(id))).map(([label]) => label);
+    const isAuto = from?.length ? from.every(label => ['系统推荐', '组件默认'].includes(label)) : auto.some(x => skName(x) === skName(id));
+    return `<span class="skc ${live ? 'on' : ''} ${anim ? 'new' : ''} ${isAuto ? 'auto' : ''}" style="--d:${i * 90 - age}ms" title="${esc(id)}（${esc(from?.length ? from.join(' / ') : isAuto ? '系统推荐，自动带上' : 'Leader 选的')}）"><span class="skc-name">${esc(skName(id))}</span></span>`;
   }).join('')}</div>`;
 }
 function storyCard(s) {
@@ -1659,6 +1825,79 @@ async function hydrate() {
 }
 
 // ================= Leader 控制台 =================
+function canvasLeaderState() {
+  const health = currentLeaderHealth(), L = S.leaderBoard || {};
+  if (!S.leader) return { kind: 'idle', label: '无 Leader', color: 'muted' };
+  if (!health.available && health.status !== 'unverified') return { kind: 'paused', label: 'Leader 不可用 · ' + (health.label || '请去设置'), color: 'bad' };
+  const state = leaderState(L);
+  if (state.kind === 'working') return { ...state, label: '等节点完成' };
+  if (state.kind === 'idle' && W?.running && (W.graph?.nodes || []).some(n => ['pending', 'running', 'queued'].includes(nst(n.id).status))) return { kind: 'working', label: '等节点完成', color: 'muted' };
+  return state;
+}
+const canvasLeaderRound = () => (S.leaderBoard?.log || []).find(t => t.actions?.length) || S.leaderBoard?.log?.[0];
+function renderLeaderConsole() {
+  const box = $('leaderConsole'); if (!box || !S) return;
+  const agent = S.agents.find(a => a.id === S.leader) || {}, health = currentLeaderHealth(), state = canvasLeaderState(), round = canvasLeaderRound();
+  const collapsed = localStorage.getItem('leaderConsoleCollapsed') === '1', since = state.run && (state.run.startedAt || state.run.createdAt);
+  const reason = round?.progress?.reason || (round?.actions || []).map(a => a.why).filter(Boolean).join('；') || (round ? '等待节点结果' : '节点完成后，Leader 会在这里说明下一步');
+  box.classList.toggle('collapsed', collapsed);
+  box.style.setProperty('--c', color(S.leader || 'muted'));
+  const html = `<div class="leader-console-person"><div class="leader-avatar" id="leaderAnchor" aria-hidden="true">${esc((agent.name || 'L').slice(0, 1))}</div><div class="leader-console-identity"><span class="leader-console-caption">Leader 指挥台</span><div class="leader-console-name"><b style="color:${color(S.leader || 'muted')}">${esc(agent.name || (S.leader ? agentName(S.leader) : 'Leader'))}</b>${agent.effectiveModel ? `<span class="leader-model" title="${esc(agent.effectiveModel)}">${esc(agent.effectiveModel)}</span>` : ''}</div><span class="leader-state leader-console-state ${state.kind}" style="--state:var(--${state.color})" title="${esc(health.label || state.label)}"><span class="dot"></span>${esc(state.label)}${since ? ` · <span data-since="${esc(since)}">${fmtDur(Date.now() - Date.parse(since))}</span>` : ''}${health.status === 'unverified' ? ' · 尚未验证' : ''}</span></div></div><div class="leader-console-decision"><div class="leader-console-reason" title="${esc(leaderText(reason))}">${leaderCopy(reason)}</div><div class="leader-pills">${leaderPills(round?.actions || [])}</div></div><div class="leader-console-actions"><span class="leader-console-links row"><button ${state.run ? '' : 'disabled'} title="打开本轮 Leader 的真实终端" onclick="openCanvasLeaderTerm()">实时日志</button><button onclick="goPage('leader')">Leader 页 ↗</button></span><button class="ghost" aria-expanded="${!collapsed}" title="${collapsed ? '展开' : '收起'} Leader 指挥台" onclick="toggleLeaderConsole()">${collapsed ? '▾ 展开' : '▴ 收起'}</button></div>`;
+  // 保留相同状态下的 DOM，计时器和呼吸灯不会因轮询重播。
+  const signature = JSON.stringify([collapsed, agent.name, agent.effectiveModel, health.status, state.kind, state.label, state.run?.id, since, reason, round?.actions]);
+  if (box._signature !== signature) { box.innerHTML = html; box._signature = signature; }
+  syncWfBarHeight(); tick();
+}
+window.toggleLeaderConsole = () => { localStorage.setItem('leaderConsoleCollapsed', $('leaderConsole')?.classList.contains('collapsed') ? '0' : '1'); renderLeaderConsole(); };
+window.openCanvasLeaderTerm = () => { const run = canvasLeaderState().run; if (run) openTerm(run.id); };
+let leaderConnectionFrame = 0, leaderWireTimer = null, leaderCanvasObserver = null;
+function scheduleLeaderConnections() {
+  cancelAnimationFrame(leaderConnectionFrame);
+  if ($('leaderWires')) leaderConnectionFrame = requestAnimationFrame(drawLeaderConnections);
+}
+function observeLeaderCanvas() {
+  leaderCanvasObserver?.disconnect();
+  leaderCanvasObserver = new ResizeObserver(syncWfBarHeight);
+  for (const el of [$('wfBar'), $('leaderConsole'), $('canvas')]) if (el) leaderCanvasObserver.observe(el);
+}
+function leaderActionTargets(round) {
+  const targets = new Set(), nodes = W?.graph?.nodes || [];
+  for (const a of round?.actions || []) {
+    if (a.outcome && a.outcome !== 'ok') continue;
+    if (componentGraphMode() && a.type === 'call') {
+      const n = nodes.find(n => (n.config?.callId || n.id) === a.id); if (n) targets.add(n.id);
+    } else if (['approve_node', 'rerun_node'].includes(a.type) && nodes.some(n => n.id === a.node)) targets.add(a.node);
+    else if (a.type === 'dispatch' && a.story) {
+      const boards = nodes.filter(n => n.type === 'dev'), board = boards.find(n => n.id === a.node) || boards.find(n => nst(n.id).status === 'running') || boards.find(n => nst(n.id).status === 'waiting') || boards[0];
+      if (board) targets.add(board.id);
+    }
+  }
+  return [...targets];
+}
+function drawLeaderConnections() {
+  const svg = $('leaderWires'), consoleBox = $('leaderConsole'), cv = $('canvas');
+  if (!svg || !consoleBox || !cv) return;
+  clearTimeout(leaderWireTimer);
+  if (!S.leader) { svg.replaceChildren(); return; }
+  const round = canvasLeaderRound(), targets = leaderActionTargets(round), root = svg.getBoundingClientRect(), canvas = cv.getBoundingClientRect(), consoleRect = consoleBox.getBoundingClientRect();
+  const anchor = (consoleBox.classList.contains('collapsed') ? consoleBox.querySelector('.leader-console-person') : $('leaderAnchor'))?.getBoundingClientRect() || consoleRect;
+  const source = { x: Math.min(anchor.left + anchor.width / 2, canvas.right - 20) - root.left, y: consoleRect.bottom - root.top - 1 }, age = Date.now() - Date.parse(round?.at || ''), fresh = age >= 0 && age < 3000;
+  svg.style.setProperty('--wire', color(S.leader || 'muted'));
+  const old = new Map(Array.from(svg.children).map(el => [el.dataset.target, el]));
+  for (const id of targets) {
+    const el = Array.from($('nodes')?.children || []).find(n => n.dataset.id === id); if (!el) continue;
+    const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top;
+    if (x < canvas.left || x > canvas.right || y < canvas.top || y > canvas.bottom) continue;
+    const end = { x: x - root.left, y: y - root.top }, bend = Math.max(20, (end.y - source.y) * .5);
+    let path = old.get(id); old.delete(id);
+    if (!path) { path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.dataset.target = id; svg.appendChild(path); }
+    path.setAttribute('d', `M${source.x},${source.y} C${source.x},${source.y + bend} ${end.x},${end.y - bend} ${end.x},${end.y}`);
+    path.setAttribute('class', `leader-wire${fresh ? ' fresh' : ''}`);
+    path.style.animationDelay = fresh ? `${-age}ms` : '';
+  }
+  old.forEach(el => el.remove());
+  if (fresh) leaderWireTimer = setTimeout(scheduleLeaderConnections, 3005 - age);
+}
 const LEADER_OPEN = new Set(), LEADER_HISTORY = new Set(); // 按项目保留展开状态，不受自动重绘影响
 const LEADER_ACT = { call: '调用组件', dispatch: '派活', set_status: '验收', approve_node: '通过节点', rerun_node: '重做节点', ask_human: '提问', finish: '宣布完成' };
 const leaderKey = (type, id = '') => S.project + '|' + type + '|' + id;
@@ -1675,6 +1914,10 @@ function leaderState(L) {
   if (jobs.length) return { kind: 'working', label: `派活中 · ${jobs.length} 个任务在跑`, color: 'accent' };
   if (L.finished) return { kind: 'finished', label: '已完成', color: 'ok' };
   return { kind: 'idle', label: '空闲', color: 'muted' };
+}
+function leaderErrorText(error) {
+  if (error && (/not logged in|\/login\b|\b401\b|unauthorized|expired/i.test(String(error)) || currentLeaderHealth().status === 'expired')) return `Leader（${agentName(S.leader)}）没登录，没法工作。请去设置登录后再继续。`;
+  return error;
 }
 function leaderFold(type, text, notes = false) {
   const key = leaderKey(type);
@@ -1744,7 +1987,7 @@ function leaderView() {
     <div class="leader-person" title="${esc(meta)}"><div class="row"><b style="color:${color(S.leader)}">${leaderCopy(agentName(S.leader))}</b>${agent.effectiveModel ? `<span class="leader-model" style="color:${color(S.leader)}" title="${esc(agent.effectiveModel)}">${leaderCopy(agent.effectiveModel)}</span>` : ''}</div><div class="row small"><span class="leader-state ${state.kind}" style="--state:var(--${state.color})"><span class="dot"></span>${state.label}${since ? ` · <span data-since="${esc(since)}">${fmtDur(Date.now() - Date.parse(since))}</span>` : ''}</span><span class="muted small">唤醒 ${L.ticks || 0} 次</span></div></div>
     <div class="leader-progress"><div class="row small"><span>${componentMode() ? '组件' : 'Story'} ${done} / ${total}</span><span class="grow"></span>${!componentMode() && tlProject === S.project && Array.isArray(TL) ? `<span class="muted">返工 ${tlReworks()} 次</span>` : ''}</div><progress value="${done}" max="${total || 1}" aria-label="${componentMode() ? '组件' : 'Story'} 完成 ${done} / ${total}"></progress></div>
     <div class="row leader-controls">${componentMode() ? '<span class="small muted">流程深浅由 Leader 自主判断</span>' : `<span class="seg" aria-label="验收档位">${levels.map(([k, label, tip]) => `<button class="${S.acceptLevel === k ? 'on' : ''}" aria-pressed="${S.acceptLevel === k}" title="${esc(tip)}" onclick="setAcceptLevel('${k}')">${label}</button>`).join('')}</span>`}${primary}</div>
-    ${L.error ? `<div class="small leader-status-error">${leaderCopy(L.error)}</div>` : ''}</div>
+    ${L.error ? `<div class="small leader-status-error">${leaderCopy(leaderErrorText(L.error))}</div>` : ''}</div>
   <div class="leader-notices">${workflowNotices()}</div>
   ${L.ask && !L.ask.answered ? `<div class="card leader-ask"><b style="color:var(--warn)">Leader 在等你回答</b><div class="leader-copy">${leaderCopy(L.ask.q)}</div><label class="field" style="margin-top:8px"><span>你的回答</span><textarea id="leaderAns" rows="2"></textarea></label><div class="row" style="margin-top:6px"><span class="grow"></span><button class="primary" onclick="answerLeader()">回答</button></div></div>` : ''}
   ${L.finished ? `<div class="card leader-delivery"><div class="row"><b style="color:var(--ok)">交付总结</b><span class="small muted">${L.finished.at ? new Date(L.finished.at).toLocaleString() : ''}</span><span class="grow"></span><button class="small" onclick="api('/api/leader/resume',{}).then(load)">继续做</button></div>${leaderFold('delivery', L.finished.summary || '已完成，暂无总结。')}</div>` : ''}
@@ -2057,10 +2300,10 @@ window.rejectDialog = key => {
 window.doReject = async key => { const fb = $('rejText').value.trim(); if (!fb) return toast('写一下打回原因'); S = await api('/api/status', { key, status: 'ready-for-dev', feedback: fb }); $('dlg').close(); renderPage(); };
 
 // ---- 项目 ----
-window.newProjectDialog = () => {
+window.newProjectDialog = (defaults = {}) => {
   dialog('新建项目', `<div class="form">
-    <label>项目名<input id="npName" placeholder="例：thermostat-v2"></label>
-    <label>从一句需求开始<textarea id="npRequirement" rows="3" placeholder="例：写一个 index.html，页面中间显示当前时间，每秒刷新"></textarea></label>
+    <label>项目名<input id="npName" placeholder="例：thermostat-v2" value="${esc(defaults.name || '')}"></label>
+    <label>从一句需求开始<textarea id="npRequirement" rows="3" placeholder="例：写一个 index.html，页面中间显示当前时间，每秒刷新">${esc(defaults.requirement || '')}</textarea></label>
     <label>放在哪个文件夹<div class="row"><input id="npParent" class="grow" value="${esc(S.projectsRoot)}"><button onclick="pickFolder(p=>$('npParent').value=p)">浏览…</button></div></label>
     <label>编排模式<select id="npOrchestration"><option value="components">组件自主编排（Leader 决定流程深浅）</option><option value="template">模板流程（BMAD / 快速实现等）</option></select></label>
     <label>项目规范<select id="npTpl"><option value="generic">通用软件</option><option value="embedded">嵌入式（带 embedded-standards 约束 + 嵌入式角色）</option></select></label>
@@ -2120,7 +2363,21 @@ $('modeSeg').onclick = async e => {
   const m = e.target.dataset.m; if (!m || m === S.mode) return;
   S = await api('/api/mode', { mode: m }); toast(m === 'leader' ? '已切到 Leader 统筹：Leader 每次被唤醒都会看全局，自己决定下一步' : m === 'auto' ? `已切到规则自动：按依赖派发，Leader 逐个评审（最多打回 ${S.maxRounds} 轮）` : '已切到手动模式：每步等你确认', 'ok'); if (m === 'leader') goPage('leader'); else refresh();
 };
-$('leader').onchange = e => api('/api/leader', { agent: e.target.value }).then(x => { S = x; refresh(); });
+window.selectLeader = async id => { S = await api('/api/leader', { agent: id }); if ($('dlg').open) $('dlg').close(); await refresh(); };
+window.openLeaderSettings = async id => {
+  $('dlg').close(); settingsTab = 'agents'; await openSettings();
+  if (id) $('login-' + id)?.scrollIntoView({ block: 'center' });
+};
+$('leader').onchange = e => {
+  const id = e.target.value, agent = S.agents.find(a => a.id === id), availability = agent ? agentAvailability(agent) : null;
+  if (availability && ['expired', 'unverified'].includes(availability.status)) {
+    renderTop();
+    const warning = availability.status === 'expired' ? `${agent.name} 登录已失效，当 Leader 会一直失败。仍要选它吗？` : `${agent.name} 的登录尚未验证，担任 Leader 可能失败。仍要选它吗？`;
+    dialog('确认 Leader 选择', `<div class="form"><p style="margin:0">${esc(warning)}</p><div class="row"><button onclick="openLeaderSettings('${jsq(id)}')">去设置登录</button><span class="grow"></span><button onclick="$('dlg').close()">取消</button><button class="bad" onclick="selectLeader('${jsq(id)}')">仍然选择</button></div></div>`, true);
+    return;
+  }
+  selectLeader(id);
+};
 
 // ---- 设置 ----
 let SETTINGS = null, settingsTab = 'providers';
@@ -2308,6 +2565,7 @@ es.addEventListener('log', e => {
 });
 es.addEventListener('agenttest', e => {
   const t = JSON.parse(e.data), a = SETTINGS?.agents.find(x => x.id === t.id);
+  if (t.status !== 'running') { clearTimeout(pending); pending = setTimeout(() => refresh().then(termSync).catch(() => {}), 250); }
   if (!a) return;
   if (t.login) { a.login = t.login; const login = $('login-' + t.id); if (login) login.outerHTML = loginSettingsView(a); }
   if (t.scope !== a.testScope) return;
