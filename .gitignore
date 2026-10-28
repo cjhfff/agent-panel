@@ -1,5 +1,8 @@
 secrets.env
 panel.config.json
+schedules.json
+workflows/saved/*
+!workflows/saved/.gitkeep
 logs/
 projects/
 *.bak.*

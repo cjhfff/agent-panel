@@ -14,6 +14,13 @@ import { createHash } from 'node:crypto';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_FILE = process.env.PANEL_CONFIG ? path.resolve(process.env.PANEL_CONFIG) : path.join(HERE, 'panel.config.json');
+// Alternate instances never share saved workflows, schedules or devtasks with production.
+const INSTANCE_DATA = process.env.PANEL_CONFIG ? path.dirname(CONFIG_FILE) : HERE;
+const SAVED_WORKFLOWS = path.join(INSTANCE_DATA, 'workflows', 'saved');
+const SCHEDULES_FILE = path.join(INSTANCE_DATA, 'schedules.json');
+const DEVTASKS_DIR = path.join(INSTANCE_DATA, 'logs', 'devtasks');
+const DEVTASKS_STATE = path.join(DEVTASKS_DIR, 'state.json');
+const SCHEDULER_TEST = process.env.PANEL_SCHEDULER_TEST === '1' && !!process.env.PANEL_CONFIG && Number(process.env.PORT || 4590) !== 4590;
 const AGENTS_FILE = path.join(HERE, 'agents.json');
 const UI_CHECK = path.join(HERE, 'tools', 'ui-check.mjs').replace(/\\/g, '/');
 const SECRETS_FILE = path.join(HERE, 'secrets.env');
@@ -54,7 +61,7 @@ const isDir = f => { try { return fs.statSync(f).isDirectory(); } catch { return
 const stripAnsi = s => stripVTControlCharacters(s.replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\|$)/g, '').replace(/\x1b[P^_X][\s\S]*?(?:\x1b\\|$)/g, ''));
 const slug = s => String(s).trim().replace(/[\\/:*?"<>|\s]+/g, '-').replace(/^-+|-+$/g, '') || 'project';
 
-let config = Object.assign({ project: null, recent: [], projectsRoot: path.join(HERE, 'projects'), maxParallel: 1 }, readJson(CONFIG_FILE, {}));
+let config = Object.assign({ project: null, recent: [], projectsRoot: path.join(HERE, 'projects'), maxParallel: 1, maxDevtasks: 2, devtaskRoots: null }, readJson(CONFIG_FILE, {}));
 const saveConfig = () => writeJson(CONFIG_FILE, config);
 function useProject(dir) {
   config.project = path.resolve(dir);
@@ -181,8 +188,8 @@ function setTomlValues(part, values) {
     else part.lines.unshift(line);
   }
 }
-function writeProviderConfig(a, p, model) {
-  const grok = a.id === 'grok', dir = path.join(HERE, grok ? 'grok-home' : 'codex-home'), f = path.join(dir, 'config.toml');
+function writeProviderConfig(a, p, model, dir = path.join(HERE, `${a.id}-home`)) {
+  const grok = a.id === 'grok', f = path.join(dir, 'config.toml');
   const parts = tomlParts(exists(f) ? fs.readFileSync(f, 'utf8') : ''), id = `panel_${p.id.replace(/-/g, '_')}`;
   let selected;
   if (grok) {
@@ -209,7 +216,7 @@ function invocationEnv(a, perm = {}) {
   for (const k of Object.keys(env)) if (managed.has(k.toUpperCase())) delete env[k];
   return env;
 }
-function buildInvocation(a, prompt, cwd) {
+function buildInvocation(a, prompt, cwd, { authDir } = {}) {
   const perm = (a.perm || {})[a.permission || 'max'] || {}, auth = authFor(a), p = validateProvider(a, auth);
   const args = [];
   for (const x of a.args) {
@@ -223,15 +230,21 @@ function buildInvocation(a, prompt, cwd) {
     const key = providerKey(p); if (!key) throw new Error('服务商尚未设置 API Key');
     env[p.keyEnv] = key;
     if (a.id === 'claude') {
-      Object.assign(env, { ANTHROPIC_BASE_URL: p.baseUrl, ANTHROPIC_AUTH_TOKEN: key, CLAUDE_CONFIG_DIR: path.join(HERE, 'claude-home') });
+      Object.assign(env, { ANTHROPIC_BASE_URL: p.baseUrl, ANTHROPIC_AUTH_TOKEN: key, CLAUDE_CONFIG_DIR: authDir || path.join(HERE, 'claude-home') });
       if (auth.model) env.ANTHROPIC_MODEL = auth.model;
       fs.mkdirSync(env.CLAUDE_CONFIG_DIR, { recursive: true });
       const settings = path.join(env.CLAUDE_CONFIG_DIR, 'settings.json');
       if (!exists(settings)) writeJson(settings, {});
     } else if (a.id === 'gemini') Object.assign(env, { GEMINI_API_KEY: key, GOOGLE_GEMINI_BASE_URL: p.baseUrl });
     else if (['codex', 'grok'].includes(a.id)) {
-      writeProviderConfig(a, p, auth.model);
-      env[a.id === 'codex' ? 'CODEX_HOME' : 'GROK_HOME'] = path.join(HERE, `${a.id}-home`);
+      const dir = authDir || path.join(HERE, `${a.id}-home`);
+      if (authDir) {
+        fs.mkdirSync(dir, { recursive: true });
+        const baseline = path.join(HERE, `${a.id}-home`, 'config.toml');
+        if (exists(baseline) && !exists(path.join(dir, 'config.toml'))) fs.copyFileSync(baseline, path.join(dir, 'config.toml'));
+      }
+      writeProviderConfig(a, p, auth.model, dir);
+      env[a.id === 'codex' ? 'CODEX_HOME' : 'GROK_HOME'] = dir;
     }
   }
   return { exe: a.resolved || resolveCmd(a.cmd), args, env, stream: a.stream || null };
@@ -375,14 +388,14 @@ const readPlan = p => { const plan = readJson(p.plan, null); return normalizePla
 // ---------- 面板状态 ----------
 const loadState = p => {
   const s = readJson(p.state, {});
-  return { leader: null, assignments: {}, feedback: {}, runs: [], stages: {}, ...s };
+  return { leader: null, assignments: {}, feedback: {}, runs: [], stages: {}, orchestration: 'template', components: [], ...s };
 };
 const saveState = (p, s) => writeJson(p.state, s);
 const skillsBase = p => exists(path.join(p.root, '.claude', 'skills')) ? '.claude/skills' : '.agents/skills';
 
 function snapshot(project = config.project) {
   const agents = loadAgents().map(({ resolved, ...a }) => ({ id: a.id, name: a.name, available: a.available, installed: a.installed, enabled: a.enabled !== false, strengths: a.strengths, permission: a.permission, effectiveModel: a.effectiveModel, relay: a.relay, auth: a.auth, authError: a.authError }));
-  if (!project || !exists(project)) return { project: null, recent: config.recent.filter(exists), projectsRoot: config.projectsRoot, agents, maxParallel: config.maxParallel };
+  if (!project || !exists(project)) return { project: null, recent: config.recent.filter(exists), projectsRoot: config.projectsRoot, agents, maxParallel: config.maxParallel, scheduleRunningCount: scheduleRunningCount(), ...devtaskSnapshot() };
   const p = P(project), parsed = parseEpics(p.epics), sprint = readSprint(p.sprint), st = loadState(p);
   const stories = parsed.stories.map(s => {
     const key = Object.keys(sprint).find(k => k.startsWith(`${s.epic}-${s.n}-`)) || `${s.epic}-${s.n}`;
@@ -392,8 +405,9 @@ function snapshot(project = config.project) {
   for (const f of walk(p.planning, new Set(['panel']))) if (f.endsWith('.md')) docs.push(path.relative(p.root, f).replace(/\\/g, '/'));
   for (const f of ['AGENTS.md', 'docs/embedded-standards.md']) if (exists(path.join(p.root, f))) docs.unshift(f);
   return {
-    project: p.root, projectName: path.basename(p.root), recent: config.recent.filter(exists), projectsRoot: config.projectsRoot,
+    project: p.root, projectName: path.basename(p.root), recent: config.recent.filter(exists), projectsRoot: config.projectsRoot, scheduleRunningCount: scheduleRunningCount(), ...devtaskSnapshot(),
     bmadInstalled: exists(path.join(p.root, '_bmad')), hasEpics: exists(p.epics), hasSprint: exists(p.sprint), maxParallel: config.maxParallel,
+    orchestration: st.orchestration, fixedRecipe: !!st.fixedRecipe, components: componentCalls(p, st), componentCalls: componentCalls(p, st),
     ...triageSnapshot(p, st), agents, epics: parsed.epics, stories, leader: st.leader, leaderSkills: st.leaderSkills || [], acceptance: st.acceptance || {}, mode: st.mode || 'manual', maxRounds: st.maxRounds || 2, acceptLevel: acceptLevel(st), leaderBoard: (() => { const L = st.leaderBoard || {}; return { notes: L.notes || '', progress: L.progress || null, ask: L.ask || null, finished: L.finished || null, error: L.error || null, ticks: L.ticks || 0, lastTickAt: L.lastTickAt || null, log: (L.log || []).slice(-30).reverse(), answers: L.answers || [] }; })(), autoRounds: st.autoRounds || {}, storySkills: (() => { const out = {}, pl = readPlan(p); for (const x of (pl && pl.assignments) || []) if (x.skills && x.skills.length) out[fullStoryKey(p, x.key)] = [...x.skills]; for (const [k, v] of Object.entries(st.leaderInstr || {})) if (v.skills && v.skills.length) out[k] = [...new Set([...(out[k] || []), ...v.skills])]; return out; })(), storyAutoSkills: Object.fromEntries(Object.entries(st.leaderInstr || {}).map(([k, v]) => [k, v.autoSkills || []])), plan: readPlan(p), stages: stageInfo(p, st),
     runs: st.runs.slice(-80).reverse().map(r => { if (!r.encodingBroken) readAgentResult(p, r); return { ...r, lastLine: live.get(r.id) || r.lastLine, lastOutputAt: lastOut.get(r.id) || null }; }), docs,
   };
@@ -755,7 +769,7 @@ function launch({ exe, args, env, stream }, cwd, logFile, onChunk, onExit, label
 function newRunId(kind, who) { return `${new Date().toISOString().replace(/[-:T.Z]/g, '')}-${kind}-${who}-${Math.random().toString(36).slice(2, 6)}`; }
 function updateRun(p, id, patch) { const st = loadState(p); const r = st.runs.find(x => x.id === id); if (r) Object.assign(r, patch); saveState(p, st); return r; }
 
-function enqueue({ project = config.project, kind, storyKey = null, stage = null, nodeId = null, agentId, feedback = null, title = null, instructions = null, skills = null, relatedStory = null }) {
+function enqueue({ project = config.project, kind, storyKey = null, stage = null, nodeId = null, agentId, feedback = null, title = null, instructions = null, skills = null, relatedStory = null, callId = null, variant = null, bootstrap = false }) {
   const p = P(project), st = loadState(p), snap = snapshot(project);
   const agent = loadAgents().find(a => a.id === agentId);
   if (!agent) throw new Error(`没有这个 agent：${agentId}`);
@@ -765,11 +779,16 @@ function enqueue({ project = config.project, kind, storyKey = null, stage = null
   if (dup) throw new Error('这一项已经在跑或在排队');
   const story = storyKey ? snap.stories.find(s => s.key === storyKey) : null;
   if (storyKey && !story) throw new Error(`找不到 Story ${storyKey}`);
-  const run = { id: newRunId(kind === 'stage' ? stage : kind === 'node' ? 'node' : kind, agentId), kind, storyKey, stage, nodeId, title, relatedStory, agent: agentId, status: 'queued', pty: false, createdAt: now() };
+  const run = { id: newRunId(kind === 'stage' ? stage : kind === 'node' ? 'node' : kind, agentId), kind, storyKey, stage, nodeId, title, relatedStory, agent: agentId, status: 'queued', pty: false, createdAt: now(), ...(bootstrap ? { bootstrap: true } : {}) };
+  if (kind === 'component') {
+    const c = st.components.find(x => x.id === callId); if (!c) throw new Error('组件调用不存在');
+    Object.assign(run, { callId, component: c.component, variant, bootstrap, model: bootstrap ? null : agent.effectiveModel, title: `${componentDef(c.component).name} · ${callId}${bootstrap ? ' · 准备 BMAD 技能' : variant ? ' · ' + variant : ''}` });
+    c.runId = run.id; c.runIds ||= []; c.runIds.push(run.id);
+  }
   if (kind === 'triage') { run.triageInput = st.triagePending.input; st.triagePending.runId = run.id; }
   const f = runFiles(p, run); fs.mkdirSync(f.dir, { recursive: true });
   const lastImpl = storyKey && [...st.runs].reverse().find(r => r.storyKey === storyKey && r.kind === 'implement');
-  const task = kind === 'triage' ? triageTask(p, f.result) : kind === 'plan' ? leaderPlanTask(p, snap, f.result)
+  const task = bootstrap ? `# 按需准备 BMAD 技能\n项目根目录：${p.root}\n组件或固定模板首次缺少所需技能时安装 BMAD ${BMAD_VERSION}，由面板执行，不占用额外流程节点。` : kind === 'component' ? componentTask(p, callId, f.result, agentId, variant) : kind === 'triage' ? triageTask(p, f.result) : kind === 'plan' ? leaderPlanTask(p, snap, f.result)
     : kind === 'review' ? leaderReviewTask(p, story, lastImpl, f.result)
       : kind === 'stage' ? stageTask(p, stage, st, f.result, feedback)
         : kind === 'node' ? nodeTask(p, nodeId, st, f.result, feedback)
@@ -798,6 +817,7 @@ function pump() {
     const agent = loadAgents().find(a => a.id === run.agent);
     const f = runFiles(p, run);
     updateRun(p, runId, { status: 'running', startedAt: now() });
+    if (run.kind === 'component') { const s2 = loadState(p), c = s2.components.find(x => x.id === run.callId); if (c) { c.status = 'running'; c.startedAt ||= now(); saveState(p, s2); } }
     if (run.kind === 'implement') {
       try { setStoryStatus(p, run.storyKey, 'in-progress'); } catch (e) { console.error(e.message); }
       writeJson(path.join(f.dir, 'before.json'), takeSnapshot(p.root));
@@ -811,6 +831,11 @@ function pump() {
     const onExit = code => {
       clearTimeout(triageTimers.get(runId)); triageTimers.delete(runId);
       running.delete(runId);
+      if (run.bootstrap) {
+        skillCache.at = 0; const c = loadState(p).components.find(x => x.id === run.callId), node = run.kind === 'node' && readWorkflow(p).nodes.find(n => n.id === run.nodeId);
+        const missing = node ? missingPresetSkills(p, node) : c ? missingComponentSkills(p, c) : ['没有找到待准备的组件 / 节点'];
+        writeJson(f.result, { summary: code === 0 && !missing.length ? 'BMAD 技能已就绪' : 'BMAD 技能准备失败，请检查安装日志及网络；没有继续生成伪完整文档', artifacts: [], pass: code === 0 && !missing.length, findings: missing });
+      }
       const result = readAgentResult(p, run);
       const cur = loadState(p).runs.find(r => r.id === runId) || {};
       const patch = { status: code === 0 && result ? 'finished' : 'failed', exitCode: code, endedAt: now(), hasResult: !!result, encodingBroken: hasBrokenEncoding(result), lastLine: live.get(runId) };
@@ -831,7 +856,7 @@ function pump() {
         saveState(p, s2);
       }
       let needReview = false;
-      if (run.kind === 'node') {
+      if (run.kind === 'node' && !run.bootstrap) {
         const s2 = loadState(p), node = (readWorkflow(p).nodes || []).find(n => n.id === run.nodeId) || {};
         const ok = !!result && code === 0 && !cur.cancelRequested;
         s2.wf = s2.wf || { nodes: {} };
@@ -843,6 +868,14 @@ function pump() {
       if (patch.status === 'failed' && !result) patch.error = cur.error || (code === 0 ? 'agent 结束但没写结果文件' : `退出码 ${code}`);
       if (cur.cancelRequested) { patch.status = 'cancelled'; patch.error = '已手动取消'; }
       updateRun(p, runId, patch);
+      if (run.kind === 'node' && run.bootstrap) {
+        const ok = !cur.cancelRequested && code === 0 && result?.pass;
+        setNode(p, run.nodeId, ok ? { status: 'idle', note: null, result: null } : { status: 'failed', note: result?.summary || 'BMAD 技能准备失败' });
+        live.delete(runId); parsers.delete(runId); lastOut.delete(runId);
+        if (ok) { try { advanceWorkflow(p); autoDispatch(p); } catch (e) { setNode(p, run.nodeId, { status: 'failed', note: e.message }); } }
+        broadcast('state', {}); pump(); return;
+      }
+      if (run.kind === 'component') finishComponentRun(p, run, result, patch);
       live.delete(runId); parsers.delete(runId); lastOut.delete(runId);
       if (run.kind === 'triage') {
         finishTriage(p, run, !cur.cancelRequested && code === 0 ? result : null, cur.cancelRequested ? 'cancelled' : 'Leader 分诊失败');
@@ -856,7 +889,7 @@ function pump() {
       broadcast('state', {}); pump();
     };
     try {
-      const child = launch(buildInvocation(agent, prompt, p.root), p.root, f.log, onChunk, onExit, agent.name);
+      const child = launch(run.bootstrap ? bmadInvocation(p.root) : buildInvocation(agent, prompt, p.root), p.root, f.log, onChunk, onExit, run.bootstrap ? 'BMAD 技能准备' : agent.name);
       running.set(runId, child);
       updateRun(p, runId, { pty: child.pty });
       if (run.kind === 'triage') triageTimers.set(runId, setTimeout(() => {
@@ -877,21 +910,168 @@ function killTree(child) {
   else child.kill('SIGTERM');
 }
 function activePty(id) {
+  const devtask = devtaskData.runs.find(r => r.id === id);
+  if (devtask) {
+    const child = devtaskRunning.get(id);
+    if (devtask.status !== 'running' || devtask.cancelRequested || !child?.pty) throw new Error('这个运行没有正在进行的 PTY');
+    return child;
+  }
   const run = loadState(needProject()).runs.find(r => r.id === id), child = running.get(id);
   if (!run || run.status !== 'running' || run.cancelRequested || !child?.pty) throw new Error('这个运行没有正在进行的 PTY');
   return child;
 }
-function cancel(runId, p = P(config.project)) {
+function cancel(runId, p = P(config.project), withinComponent = false) {
   const st = loadState(p);
+  const rec = st.runs.find(r => r.id === runId);
+  if (rec?.kind === 'component' && !withinComponent) return cancelComponentCall(p, rec.callId, '已手动取消');
   if (st.triagePending?.runId === runId) { delete st.triagePending; if (st.wf) st.wf.running = false; saveState(p, st); }
   queue = queue.filter(q => q.runId !== runId);
   const child = running.get(runId);
   if (child) { updateRun(p, runId, { cancelRequested: true }); killTree(child); }
   else {
     const r = updateRun(p, runId, { status: 'cancelled', endedAt: now() });
+    if (r?.kind === 'component') { const s2 = loadState(p), c = s2.components.find(x => x.id === r.callId); if (c && !['done', 'failed', 'cancelled'].includes(c.status)) { c.status = 'cancelled'; c.endedAt = now(); c.error = '已取消'; saveState(p, s2); } }
     if (r && r.kind === 'stage') { const st = loadState(p); st.stages[r.stage] = { ...(st.stages[r.stage] || {}), status: 'failed' }; saveState(p, st); }
   }
   broadcast('state', {});
+}
+
+// ---------- 面板任务：独立于项目、工作流和定时任务的运行队列 ----------
+const devtaskData = readJson(DEVTASKS_STATE, { version: 1, runs: [] });
+if (!Array.isArray(devtaskData.runs)) devtaskData.runs = [];
+const devtaskRunning = new Map();
+const devtaskPersistTimers = new Map();
+function persistDevtasks() {
+  fs.mkdirSync(DEVTASKS_DIR, { recursive: true });
+  const tmp = DEVTASKS_STATE + '.tmp';
+  writeJson(tmp, devtaskData); fs.renameSync(tmp, DEVTASKS_STATE);
+}
+function devtaskFiles(run) {
+  const dir = path.join(DEVTASKS_DIR, run.id);
+  return { dir, task: path.join(dir, 'task.md'), log: path.join(dir, 'run.log'), last: path.join(dir, 'last.md'), auth: path.join(dir, 'auth') };
+}
+function devtaskMessage(run) {
+  const file = devtaskFiles(run).last;
+  if (!exists(file)) return '';
+  // Reading just the prefix also bounds API work for unexpectedly large replies.
+  const fd = fs.openSync(file, 'r');
+  try { const buf = Buffer.alloc(16008), n = fs.readSync(fd, buf, 0, buf.length, 0); return readTextPrefix(buf.subarray(0, n), 4000); }
+  finally { fs.closeSync(fd); }
+}
+function readTextPrefix(buf, count) { return new StringDecoder('utf8').write(buf).replace(/^\uFEFF+/, '').slice(0, count); }
+function publicDevtask(run) {
+  return { ...run, lastLine: live.get(run.id) || run.lastLine || '', lastOutputAt: lastOut.get(run.id) || run.lastOutputAt || null, lastMessage: devtaskMessage(run) };
+}
+function getDevtask(id) {
+  const run = devtaskData.runs.find(r => r.id === id);
+  if (!run) throw new Error('没有这个面板任务');
+  return run;
+}
+const devtaskRunningCount = () => devtaskData.runs.filter(r => r.status === 'running').length;
+const listDevtasks = () => devtaskData.runs.slice(-50).reverse().map(publicDevtask);
+function devtaskSnapshot() {
+  const recent = devtaskData.runs.slice(-50), ids = new Set(recent.map(r => r.id));
+  return { devtasks: [...devtaskData.runs.filter(r => !ids.has(r.id) && ['queued', 'running'].includes(r.status)), ...recent].reverse().map(publicDevtask), devtaskRunningCount: devtaskRunningCount() };
+}
+function devtaskEvent(phase, run) { broadcast('devtask', { phase, run: publicDevtask(run), runningCount: devtaskRunningCount() }); }
+function devtaskCwd(cwd) {
+  if (typeof cwd !== 'string' || !cwd.trim() || cwd.includes('\0')) throw new Error('cwd 必须是已存在的目录');
+  const resolved = path.resolve(HERE, cwd);
+  if (!isDir(resolved)) throw new Error('cwd 目录不存在');
+  const actual = fs.realpathSync(resolved);
+  const roots = config.devtaskRoots ?? [HERE, config.projectsRoot];
+  if (!Array.isArray(roots) || !roots.every(r => typeof r === 'string' && r.trim())) throw new Error('devtaskRoots 配置必须是目录数组');
+  const allowed = roots.some(root => {
+    const candidate = path.resolve(HERE, root);
+    if (!isDir(candidate)) return false;
+    const rel = path.relative(fs.realpathSync(candidate), actual);
+    return rel === '' || (!path.isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${path.sep}`));
+  });
+  if (!allowed) throw new Error('cwd 不在允许的 devtaskRoots 根目录内');
+  return actual;
+}
+function enqueueDevtask(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('参数必须是对象');
+  const fields = new Set(['title', 'agent', 'cwd', 'prompt', 'effort', 'model']);
+  if (Object.keys(input).some(k => !fields.has(k))) throw new Error('只接受 title、agent、cwd、prompt、effort、model，不接受命令行参数');
+  const { title, agent: agentId, prompt, effort, model } = input;
+  if (typeof title !== 'string' || !title.trim() || title.length > 240 || /[\x00-\x1f]/.test(title)) throw new Error('title 必须是 1–240 字的单行标题');
+  if (typeof prompt !== 'string' || !prompt.trim() || Buffer.byteLength(prompt, 'utf8') > 1024 * 1024 || prompt.includes('\0')) throw new Error('prompt 必须是非空文本（最多 1 MiB）');
+  const agent = loadAgents().find(a => a.id === agentId);
+  if (!agent || !agent.installed || agent.enabled === false) throw new Error('agent 必须是已安装、已启用的 agent id');
+  if (effort !== undefined && !['low', 'medium', 'high', 'xhigh', 'ultra'].includes(effort)) throw new Error('effort 仅支持 low / medium / high / xhigh / ultra');
+  if (model !== undefined && (typeof model !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$/.test(model))) throw new Error('model 必须是有效模型名称（最多 200 字）');
+  if (model !== undefined && !agent.modelFlag && !['codex', 'grok'].includes(agentId)) throw new Error('这个 agent 没有配置 modelFlag，无法覆盖模型');
+  validateProvider(agent, { ...agent.auth, ...(model !== undefined ? { model } : {}) });
+  const cwd = devtaskCwd(input.cwd);
+  const run = { id: newRunId('devtask', agentId), kind: 'devtask', title: title.trim(), agent: agentId, model: model ?? agent.effectiveModel ?? '', modelOverride: model !== undefined, effort: effort ?? null, cwd, status: 'queued', pty: false, createdAt: now(), startedAt: null, endedAt: null, exitCode: null, lastLine: '' };
+  if (effort !== undefined && agentId !== 'codex') { run.effortIgnored = true; run.notes = ['effort 仅适用于 Codex，本次已忽略']; }
+  const f = devtaskFiles(run); fs.mkdirSync(f.dir, { recursive: true });
+  const replyInstruction = agentId === 'codex' ? '' : `\n\n## 面板最终回复\n完成后请将最终回复同时写入 ${f.last}（UTF-8 文本），供面板的回复按钮读取。该文件是本任务的交付产物，允许写入；其余改动遵循上面的任务范围。\n`;
+  writeMd(f.task, prompt + replyInstruction);
+  devtaskData.runs.push(run);
+  try { persistDevtasks(); } catch (e) { devtaskData.runs.pop(); throw e; }
+  devtaskEvent('queued', run);
+  setImmediate(pumpDevtasks);
+  return publicDevtask(run);
+}
+function pumpDevtasks() {
+  const limit = Number.isInteger(config.maxDevtasks) && config.maxDevtasks > 0 ? config.maxDevtasks : 2;
+  while (devtaskRunning.size < limit) {
+    const run = devtaskData.runs.find(r => r.status === 'queued');
+    if (!run) break;
+    const f = devtaskFiles(run);
+    let completed = false;
+    const onChunk = (text, meta) => {
+      feedStatus(run.id, text); lastOut.set(run.id, now());
+      const lines = stripAnsi(text).split(/[\r\n]+/).map(s => s.trim()).filter(Boolean);
+      run.lastLine = live.get(run.id) || lines.at(-1)?.slice(0, 300) || run.lastLine;
+      run.lastOutputAt = lastOut.get(run.id);
+      broadcast('log', { runId: run.id, text, ...meta, lastLine: run.lastLine, lastOutputAt: run.lastOutputAt });
+      if (!devtaskPersistTimers.has(run.id)) devtaskPersistTimers.set(run.id, setTimeout(() => { devtaskPersistTimers.delete(run.id); persistDevtasks(); }, 1000));
+    };
+    const onExit = code => {
+      if (completed) return;
+      completed = true;
+      clearTimeout(devtaskPersistTimers.get(run.id)); devtaskPersistTimers.delete(run.id);
+      devtaskRunning.delete(run.id);
+      Object.assign(run, { status: run.cancelRequested ? 'cancelled' : code === 0 ? 'finished' : 'failed', exitCode: code, endedAt: now(), lastLine: live.get(run.id) || run.lastLine });
+      if (run.status === 'failed') run.error ||= `退出码 ${code}`;
+      live.delete(run.id); parsers.delete(run.id); lastOut.delete(run.id);
+      persistDevtasks(); devtaskEvent('finished', run); setImmediate(pumpDevtasks);
+    };
+    try {
+      const cwd = devtaskCwd(run.cwd), agent = loadAgents().find(a => a.id === run.agent);
+      if (!agent?.installed || agent.enabled === false) throw new Error('Agent 已停用或不可用');
+      const selected = { ...agent, auth: { ...agent.auth, model: run.model } };
+      const invocation = buildInvocation(selected, `读 ${f.task} 按要求完成任务`, cwd, { authDir: f.auth });
+      if (run.agent === 'codex') {
+        if (run.effort) invocation.args.push('-c', `model_reasoning_effort="${run.effort}"`);
+        invocation.args.push('-o', f.last);
+      }
+      Object.assign(run, { status: 'running', startedAt: now() }); persistDevtasks();
+      const child = launch(invocation, cwd, f.log, onChunk, onExit, agent.name);
+      devtaskRunning.set(run.id, child); run.pty = child.pty;
+      persistDevtasks(); devtaskEvent('started', run);
+    } catch (e) { const child = devtaskRunning.get(run.id); if (child) killTree(child); run.error = e.message; run.lastLine = e.message; onExit(-1); }
+  }
+}
+function cancelDevtask(id) {
+  const run = getDevtask(id);
+  if (!['queued', 'running'].includes(run.status)) return publicDevtask(run);
+  run.cancelRequested = true;
+  const child = devtaskRunning.get(id);
+  if (child) { persistDevtasks(); killTree(child); devtaskEvent('cancelling', run); }
+  else { Object.assign(run, { status: 'cancelled', endedAt: now() }); persistDevtasks(); devtaskEvent('cancelled', run); setImmediate(pumpDevtasks); }
+  return publicDevtask(run);
+}
+function recoverDevtasks() {
+  let changed = false;
+  for (const run of devtaskData.runs) if (run.status === 'running') {
+    Object.assign(run, { status: 'interrupted', endedAt: now(), error: '面板重启，运行中断' }); changed = true;
+  }
+  if (changed) persistDevtasks();
+  setImmediate(pumpDevtasks);
 }
 
 // ---------- 项目创建 / 接入（安装 BMAD + 模板） ----------
@@ -907,17 +1087,17 @@ function copyTemplate(name, dir, projectName, overwrite) {
     if (markdown) writeMd(dst, txt); else fs.writeFileSync(dst, txt);
   }
 }
+function bmadInvocation(dir) {
+  const args = ['-y', `bmad-method@${BMAD_VERSION}`, 'install', '--directory', dir, '--modules', 'bmm', '--tools', 'claude-code,codex,gemini,grok', '--user-name', readJson(CONFIG_FILE, {}).userName || 'User', '--communication-language', 'Chinese', '--document-output-language', 'Chinese', '-y'];
+  if (exists(path.join(dir, '_bmad'))) args.splice(3, 0, '--action', 'update');
+  return { exe: resolveCmd('npx'), args, env: { ...process.env, NO_COLOR: '1' } };
+}
 function setupProject(dir, template, isNew, initial = {}) {
   fs.mkdirSync(dir, { recursive: true });
   const logFile = path.join(HERE, 'logs', `setup-${Date.now()}.log`);
   const job = { dir, status: 'running', logFile, startedAt: now() };
   setupJobs.set(dir, job); broadcast('setup', { dir, status: 'running' });
   const name = path.basename(dir);
-  const tools = 'claude-code,codex,gemini,grok';
-  const args = ['-y', `bmad-method@${BMAD_VERSION}`, 'install', '--directory', dir, '--modules', 'bmm', '--tools', tools,
-    '--user-name', readJson(CONFIG_FILE, {}).userName || 'User', '--communication-language', 'Chinese', '--document-output-language', 'Chinese', '-y'];
-  if (exists(path.join(dir, '_bmad'))) args.splice(3, 0, '--action', 'update');
-  const npx = resolveCmd('npx');
   const finish = (ok, msg) => {
     job.status = ok ? 'done' : 'failed'; job.error = msg; job.endedAt = now();
     if (ok) {
@@ -941,7 +1121,7 @@ function setupProject(dir, template, isNew, initial = {}) {
     }
     broadcast('setup', { dir, status: job.status, error: job.error }); broadcast('state', {});
   };
-  launch({ exe: npx, args, env: { ...process.env, NO_COLOR: '1' } }, dir, logFile, null,
+  launch(bmadInvocation(dir), dir, logFile, null,
     code => finish(code === 0 && exists(path.join(dir, '_bmad')), code === 0 ? null : `安装失败，退出码 ${code}`), 'BMAD 安装');
   return job;
 }
@@ -1277,6 +1457,323 @@ function createSkill({ name, description, body }) {
   return `panel:${n}`;
 }
 
+// ---------- 组件化编排：组件提供能力，流程由 Leader 决定 ----------
+const COMPONENTS = [
+  { id: 'clarify', name: '澄清', desc: '向老板提问，等待回答后继续', inputs: { questions: '问题列表' }, output: { summary: '老板的回答' }, executor: 'human', defaultRole: 'leader', defaultEstimateMs: 60000 },
+  { id: 'spec', name: '需求', desc: '按需要整理需求要点或完整 PRD', inputs: { goal: '目标、范围和待确认事项' }, output: { artifacts: '需求文档相对路径' }, executor: 'agent', defaultRole: 'leader', depthOptions: ['brief', 'full'], skills: { full: ['bmad-prd'] }, defaultEstimateMs: 180000 },
+  { id: 'design', name: '方案', desc: '关键技术决策或完整架构', inputs: { goal: '要解决的技术问题' }, output: { artifacts: '技术方案相对路径' }, executor: 'agent', defaultRole: 'leader', depthOptions: ['brief', 'full'], skills: { full: ['bmad-architecture'] }, defaultEstimateMs: 180000 },
+  { id: 'split', name: '拆分', desc: '按用户价值拆成任务 JSON 列表', inputs: { max: '最多任务数（可省略）', goal: '拆分范围' }, output: { tasks: '[{id,title,goal,acceptance,agent,depends_on}]' }, executor: 'agent', defaultRole: 'leader', defaultEstimateMs: 120000 },
+  { id: 'implement', name: '实现', desc: '编写可用的产品代码', inputs: { instructions: '实现指令', skills: '技能 id 列表', writes: '允许修改的相对路径/目录/通配符', task_id: '可选，split 的任务 id', target: '稳定的目标标识（用于失败护栏）' }, output: { artifacts: '代码和验证产出路径', summary: '实现结果' }, executor: 'agent', defaultRole: 'worker', defaultEstimateMs: 480000 },
+  { id: 'test', name: '自测', desc: '测试功能；界面可用 tools/ui-check.mjs 无头实测', inputs: { focus: '关注点/验收要点', target: '测试目标' }, output: { pass: '是否通过', findings: '问题列表', artifacts: '测试证据路径' }, executor: 'agent', defaultRole: 'worker', defaultEstimateMs: 180000 },
+  { id: 'review', name: '评审', desc: '由另一个 agent 阅读代码和结果找问题', inputs: { focus: '关注点', target: '实现调用 id 或任务标识' }, output: { pass: '是否通过', findings: '问题列表' }, executor: 'agent', defaultRole: 'reviewer', defaultEstimateMs: 180000 },
+  { id: 'crosscheck', name: '交叉验收', desc: '由非实现者逐条验收', inputs: { acceptance: '逐条验收要点', target: '实现调用 id 或任务标识' }, output: { pass: '是否通过', findings: '逐条验收结果', artifacts: '验收证据路径' }, executor: 'agent', defaultRole: 'reviewer', defaultEstimateMs: 240000 },
+  { id: 'compare', name: '方案对比', desc: '两个不同 agent 各出方案，再由 Leader 合并', inputs: { agents: '两个不同的可用 agent id', goal: '比较目标与标准' }, output: { summary: 'Leader 合并结论', artifacts: '两版方案与合并方案路径' }, executor: 'agent', defaultRole: 'leader', defaultEstimateMs: 360000 },
+  { id: 'fix', name: '修复', desc: '按问题列表修改实现并验证', inputs: { findings: '问题列表', instructions: '修改指令', writes: '允许修改的相对路径/目录/通配符', target: '修复目标' }, output: { summary: '修复结果', artifacts: '修改和测试路径', pass: '是否已修好' }, executor: 'agent', defaultRole: 'worker', defaultEstimateMs: 240000 },
+  { id: 'doc', name: '文档', desc: '编写用户需要的使用说明或 README', inputs: { goal: '文档目标和读者', writes: '文档改动范围' }, output: { artifacts: '说明文档路径' }, executor: 'agent', defaultRole: 'worker', defaultEstimateMs: 120000 },
+  { id: 'deliver', name: '交付', desc: '汇总交付说明并宣布完成（finish 的等价动作）', inputs: { summary: '如何打开使用、已实现内容和已知限制', artifacts: '交付文件相对路径' }, output: { summary: '交付说明', artifacts: '交付文件' }, executor: 'panel', defaultRole: 'leader', defaultEstimateMs: 1000 },
+];
+const isComponents = st => st.orchestration === 'components';
+const componentDef = id => COMPONENTS.find(c => c.id === id);
+const COMPONENT_PRINCIPLES = '流程深浅你自己按需求判断。简单的东西直接实现 + 快速自查就交付；只有真的需要时才写需求文档、方案、拆分、交叉验收。不要为流程而流程：不派同步文档、核对就绪、准备报告这类不产出用户价值的活。老板看重“好看好用”。拿不准需求时用 clarify 问一次，别猜大方向。';
+let componentHistoryCache = { at: 0, key: '', value: [] };
+function componentCatalog(p) {
+  const roots = new Set([config.project, ...(config.recent || []), p?.root].filter(Boolean));
+  if (isDir(config.projectsRoot)) for (const e of fs.readdirSync(config.projectsRoot, { withFileTypes: true })) if (e.isDirectory()) roots.add(path.join(config.projectsRoot, e.name));
+  const key = [...roots].sort().join('|');
+  if (componentHistoryCache.key === key && Date.now() - componentHistoryCache.at < 10000) return componentHistoryCache.value;
+  const samples = Object.fromEntries(COMPONENTS.map(c => [c.id, []]));
+  for (const root of roots) {
+    const q = P(root), st = loadState(q), callRuns = new Set((st.components || []).flatMap(c => c.runIds || [c.runId]).filter(Boolean));
+    for (const c of st.components || []) {
+      const ms = Date.parse(c.endedAt) - Date.parse(c.startedAt || c.createdAt);
+      if (samples[c.component] && Number.isFinite(ms) && ms >= 0) samples[c.component].push(ms);
+    }
+    const graph = readJson(q.workflow, {});
+    for (const r of st.runs) {
+      if (callRuns.has(r.id)) continue;
+      const preset = (graph.nodes || []).find(n => n.id === r.nodeId)?.config?.preset;
+      const id = r.component || ({ prd: 'spec', architecture: 'design', epics: 'split' })[r.stage || preset] || ({ implement: 'implement', review: 'review', test: 'test' })[r.kind];
+      const ms = Date.parse(r.endedAt) - Date.parse(r.startedAt);
+      if (samples[id] && Number.isFinite(ms) && ms >= 0) samples[id].push(ms);
+    }
+  }
+  const value = COMPONENTS.map(c => ({ ...c, count: samples[c.id].length, avgMs: samples[c.id].length ? Math.round(samples[c.id].reduce((a, b) => a + b, 0) / samples[c.id].length) : c.defaultEstimateMs, estimated: !samples[c.id].length }));
+  componentHistoryCache = { at: Date.now(), key, value }; return value;
+}
+function componentCalls(p, st = loadState(p)) {
+  return (st.components || []).map(c => {
+    const runs = (c.runIds || [c.runId]).map(id => st.runs.find(r => r.id === id)).filter(Boolean), active = runs.find(r => ['running', 'queued'].includes(r.status));
+    return { ...c, name: componentDef(c.component)?.name || c.component, status: active?.status || c.status, runId: active?.id || c.runId, runs: runs.map(r => ({ id: r.id, agent: r.agent, model: r.model, status: r.status, variant: r.variant })), lastLine: active ? live.get(active.id) || active.lastLine : null };
+  });
+}
+function componentGraph(p, st = loadState(p)) {
+  const calls = componentCalls(p, st), levels = new Map([['start', 0]]), rows = new Map(), nodes = [{ id: 'start', type: 'start', title: '需求', x: 70, y: 90, config: {} }], edges = [];
+  for (const c of calls) {
+    const deps = c.depends_on?.length ? c.depends_on : ['start'], level = 1 + Math.max(...deps.map(id => levels.get(id) || 0)), row = rows.get(level) || 0;
+    levels.set(c.id, level); rows.set(level, row + 1);
+    nodes.push({ id: c.id, type: 'component', title: c.name, x: 70 + level * 310, y: 90 + row * 180, config: { component: c.component, callId: c.id, agent: c.agent, model: c.model, why: c.why, depth: c.depth } });
+    for (const from of deps) edges.push({ from, to: c.id });
+  }
+  if (st.leaderBoard?.finished) {
+    const leaves = calls.filter(c => !calls.some(x => x.depends_on?.includes(c.id))).map(c => c.id);
+    nodes.push({ id: 'end', type: 'end', title: '完成', x: 70 + (1 + Math.max(0, ...levels.values())) * 310, y: 90, config: {} });
+    for (const from of leaves.length ? leaves : ['start']) edges.push({ from, to: 'end' });
+  }
+  return { name: '组件化编排 · 实况图', nodes, edges };
+}
+function componentStates(p, st) {
+  return { start: { status: requirementText(p) ? 'done' : 'idle' }, ...Object.fromEntries(componentCalls(p, st).map(c => [c.id, { ...c, finishedAt: c.endedAt }])), ...(st.leaderBoard?.finished ? { end: { status: 'done' } } : {}) };
+}
+const componentResultValid = r => !!r && typeof r === 'object' && !Array.isArray(r) && typeof r.summary === 'string' && Array.isArray(r.artifacts) && r.artifacts.every(f => typeof f === 'string' && !path.win32.isAbsolute(f) && !path.posix.isAbsolute(f) && !f.split(/[\\/]/).includes('..')) && (r.pass === undefined || typeof r.pass === 'boolean') && ['findings', 'tasks', 'open_questions'].every(k => r[k] === undefined || Array.isArray(r[k]));
+function componentAsk(p, q, guard = null) {
+  const st = loadState(p); st.leaderBoard ||= {}; st.leaderBoard.ask = { q, at: now(), answered: false, guard }; saveState(p, st);
+}
+function componentTarget(c) { return String(c.inputs?.target || c.inputs?.task_id || c.inputs?.goal || c.inputs?.title || JSON.stringify(c.inputs?.writes || []) || 'project').trim().toLowerCase(); }
+function componentFailureGuard(p, call) {
+  const st = loadState(p), prior = st.components.filter(c => c.component === call.component && componentTarget(c) === componentTarget(call) && ['done', 'failed'].includes(c.status)).slice(-2);
+  if (prior.length === 2 && prior.every(c => c.status === 'failed')) componentAsk(p, `组件“${componentDef(call.component).name}”对目标“${componentTarget(call)}”已连续失败 2 次：${call.error || call.result?.summary || '结果未通过'}。请说明下一步如何处理。`, 'failures');
+}
+function selectComponentAgent(st, c, a) {
+  const available = loadAgents().filter(x => x.available), requested = a.agent || a.inputs?.agent;
+  let who = requested === 'leader' ? st.leader : requested;
+  const targetIds = new Set([...(a.depends_on || []), a.inputs?.target].filter(Boolean));
+  for (const id of targetIds) for (const dep of st.components.find(x => x.id === id)?.depends_on || []) targetIds.add(dep);
+  const implementers = new Set(st.components.filter(x => ['implement', 'fix'].includes(x.component) && (targetIds.has(x.id) || (a.inputs?.target && componentTarget(x) === String(a.inputs.target).toLowerCase()))).map(x => x.agent));
+  if (!targetIds.size && ['review', 'crosscheck'].includes(c.id)) for (const x of st.components.filter(x => ['implement', 'fix'].includes(x.component))) implementers.add(x.agent);
+  if (!who) who = c.defaultRole === 'reviewer' ? available.find(x => !implementers.has(x.id))?.id : st.leader || available[0]?.id;
+  if (!available.some(x => x.id === who)) throw new Error(`执行 agent 不可用：${who || '未选择'}`);
+  if (c.defaultRole === 'reviewer' && implementers.has(who)) throw new Error('评审/交叉验收必须由非实现者执行，请选另一个 agent');
+  return who;
+}
+function addComponentCall(p, a, { defer = false } = {}) {
+  const st = loadState(p), def = componentDef(a.component);
+  if (!isComponents(st)) throw new Error('当前不是组件编排模式');
+  if (!def) throw new Error('未知组件');
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(a.id || '') || ['start', 'end'].includes(a.id)) throw new Error('调用 id 必须是项目内唯一的字母数字/下划线/短横线（不能用 start/end）');
+  if (st.components.some(c => c.id === a.id)) throw new Error('调用 id 已使用，重做请换新 id');
+  if (st.leaderBoard?.ask && !st.leaderBoard.ask.answered) throw new Error('正在等待老板回答');
+  if (st.leaderBoard?.finished) throw new Error('项目已交付，请先继续做');
+  if (st.components.length >= (st.componentCallLimit || 80)) { componentAsk(p, `本项目已调用 ${st.components.length} 个组件，达到调用上限，已暂停。是否继续增加调用额度？`, 'limit'); throw new Error('组件调用达到上限，等待老板决定'); }
+  if (!a.inputs || typeof a.inputs !== 'object' || Array.isArray(a.inputs)) throw new Error('inputs 必须是对象');
+  const depends_on = a.depends_on || [];
+  if (!Array.isArray(depends_on) || depends_on.some(id => id !== 'start' && !st.components.some(c => c.id === id))) throw new Error('depends_on 必须引用已声明的调用 id');
+  if (a.depth && (!def.depthOptions || !def.depthOptions.includes(a.depth)) && a.depth !== 'brief') throw new Error('此组件不支持指定深度');
+  if (a.inputs.writes !== undefined && (!Array.isArray(a.inputs.writes) || a.inputs.writes.some(f => typeof f !== 'string' || path.win32.isAbsolute(f) || path.posix.isAbsolute(f) || f.split(/[\\/]/).includes('..')))) throw new Error('writes 必须是项目内相对路径数组');
+  if (a.inputs.skills !== undefined && !Array.isArray(a.inputs.skills)) throw new Error('skills 必须是数组');
+  if (def.id === 'split' && a.inputs.max !== undefined && (!Number.isInteger(a.inputs.max) || a.inputs.max < 1)) throw new Error('max 必须是正整数');
+  const agent = def.executor === 'agent' ? selectComponentAgent(st, def, a) : st.leader;
+  if (def.id === 'compare' && (!Array.isArray(a.inputs.agents) || a.inputs.agents.length !== 2 || new Set(a.inputs.agents).size !== 2 || a.inputs.agents.some(id => !loadAgents().some(x => x.id === id && x.available)))) throw new Error('方案对比需要两个不同且可用的 agent');
+  if (def.id === 'clarify' && (!Array.isArray(a.inputs.questions) || !a.inputs.questions.length || a.inputs.questions.some(q => typeof q !== 'string' || !q.trim()))) throw new Error('澄清需要非空问题列表');
+  if (def.id === 'deliver' && (typeof a.inputs.summary !== 'string' || !a.inputs.summary.trim())) throw new Error('交付需要 summary');
+  if (def.id === 'deliver' && !componentResultValid({ summary: a.inputs.summary, artifacts: a.inputs.artifacts || [] })) throw new Error('交付 artifacts 必须是项目内相对路径数组');
+  const call = { id: a.id, component: def.id, name: def.name, agent, model: loadAgents().find(x => x.id === agent)?.effectiveModel || '', depth: a.depth || (def.depthOptions ? 'brief' : null), inputs: a.inputs, depends_on: [...new Set(depends_on)], why: String(a.why || ''), status: 'pending', createdAt: now(), runIds: [] };
+  st.components.push(call); st.wf ||= { nodes: {} }; st.wf.substantiveStartedAt ||= now(); if (!defer && st.mode === 'manual') st.wf.running = true; saveState(p, st);
+  if (!defer) advanceComponents(p, true);
+  broadcast('state', {}); return call;
+}
+const componentWrites = c => [...(c.inputs.writes || (['implement', 'fix', 'doc', 'spec', 'design', 'compare'].includes(c.component) ? ['**'] : [])), ...(['spec', 'design'].includes(c.component) && c.depth === 'full' ? ['_bmad/', '.agents/', '.claude/'] : [])];
+function missingComponentSkills(p, c) { return (componentDef(c.component).skills?.[c.depth] || []).filter(name => !scanSkills(p.root).some(s => s.name === name)); }
+function componentWritesOverlap(a, b) {
+  const base = f => String(f).replace(/\\/g, '/').toLowerCase().replace(/[*?[].*$/, '').replace(/\/+$/, '');
+  return componentWrites(a).some(x => componentWrites(b).some(y => { const u = base(x), v = base(y); return !u || !v || u === v || u.startsWith(v + '/') || v.startsWith(u + '/') || (/[*?[]/.test(x + y) && (u.startsWith(v) || v.startsWith(u))); }));
+}
+function cancelComponentCall(p, id, why) {
+  const st = loadState(p), c = st.components.find(x => x.id === id);
+  if (!c || ['done', 'failed', 'cancelled'].includes(c.status)) throw new Error('只能取消尚未完成的调用');
+  c.status = 'cancelled'; c.endedAt = now(); c.error = why || '已取消';
+  if (st.leaderBoard?.ask?.callId === id) delete st.leaderBoard.ask;
+  saveState(p, st); for (const runId of c.runIds || []) { const r = loadState(p).runs.find(x => x.id === runId); if (r && ['queued', 'running'].includes(r.status)) cancel(runId, p, true); }
+  setImmediate(() => { advanceComponents(p); scheduleTick(p, '组件已取消'); broadcast('state', {}); });
+}
+function advanceComponents(p, force = false) {
+  let st = loadState(p);
+  if ((!isComponents(st) && !st.fixedRecipe) || (!force && !st.wf?.running) || st.leaderBoard?.error || (st.leaderBoard?.ask && !st.leaderBoard.ask.answered) || st.leaderBoard?.finished) return;
+  for (const pending of st.components.filter(c => c.status === 'pending')) {
+    st = loadState(p); const c = st.components.find(x => x.id === pending.id);
+    if (st.leaderBoard?.ask && !st.leaderBoard.ask.answered) break;
+    if (c.depends_on.some(id => id !== 'start' && st.components.find(x => x.id === id)?.status !== 'done')) continue;
+    if (st.components.some(x => x.id !== c.id && (['queued', 'running'].includes(x.status) || st.runs.some(r => r.callId === x.id && ['queued', 'running'].includes(r.status))) && componentWritesOverlap(c, x))) continue;
+    const def = componentDef(c.component); c.startedAt = now();
+    if (def.executor === 'human') {
+      c.status = 'waiting'; st.leaderBoard ||= {}; st.leaderBoard.ask = { q: c.inputs.questions.join('\n'), at: now(), answered: false, callId: c.id }; saveState(p, st); break;
+    }
+    if (def.executor === 'panel') {
+      if (st.fixedRecipe) {
+        c.status = 'done'; c.endedAt = now(); c.result = { summary: st.components.filter(x => x.id !== c.id && x.result?.summary).map(x => x.result.summary).at(-1) || '本次固定工作流已完成。', artifacts: [] }; saveState(p, st); continue;
+      }
+      if (st.components.some(x => x.id !== c.id && ['pending', 'queued', 'running', 'waiting'].includes(x.status))) continue;
+      if (st.runs.some(r => r.kind !== 'tick' && ['queued', 'running'].includes(r.status))) continue;
+      c.status = 'done'; c.endedAt = now(); c.result = { summary: c.inputs.summary, artifacts: c.inputs.artifacts || [] };
+      st.leaderBoard ||= {}; st.leaderBoard.finished = { at: now(), summary: c.result.summary }; st.wf.running = false; st.wf.finishedAt = now(); saveState(p, st); break;
+    }
+    c.status = 'queued'; saveState(p, st);
+    try {
+      if (c.component === 'compare') for (const [i, agentId] of c.inputs.agents.entries()) enqueue({ project: p.root, kind: 'component', callId: c.id, agentId, variant: `方案${i + 1}` });
+      else enqueue({ project: p.root, kind: 'component', callId: c.id, agentId: c.agent, bootstrap: !!missingComponentSkills(p, c).length });
+    } catch (e) {
+      const s2 = loadState(p), c2 = s2.components.find(x => x.id === c.id); c2.status = 'failed'; c2.error = e.message; c2.endedAt = now(); saveState(p, s2); componentFailureGuard(p, c2);
+    }
+  }
+  st = loadState(p);
+  if (st.fixedRecipe && st.wf?.running && st.components.every(c => c.status === 'done')) {
+    st.wf.running = false; st.wf.finishedAt = now(); st.leaderBoard ||= {};
+    st.leaderBoard.finished = { at: now(), summary: st.components.filter(c => c.result?.summary).at(-1)?.result.summary || '本次固定工作流已完成。' }; saveState(p, st); broadcast('state', {});
+  } else if (st.fixedRecipe && st.wf?.running && !st.components.some(c => ['queued', 'running'].includes(c.status)) && st.components.some(c => ['failed', 'cancelled'].includes(c.status))) {
+    const failed = st.components.find(c => ['failed', 'cancelled'].includes(c.status));
+    st.wf.running = false; st.wf.finishedAt = now(); st.leaderBoard ||= {}; st.leaderBoard.ask = null; st.leaderBoard.error = `固定工作流停止：${failed.name || failed.component}（${failed.id}）${failed.error || '执行未成功'}`;
+    for (const c of st.components) if (['pending', 'waiting'].includes(c.status)) { c.status = 'cancelled'; c.error = '固定工作流有失败调用，未继续执行'; c.endedAt = now(); }
+    saveState(p, st); broadcast('state', {});
+  }
+}
+const COMPONENT_TASKS = {
+  spec: 'brief：只写十几行需求要点和验收要点。full：使用 BMAD PRD 技能生成完整 PRD。',
+  design: 'brief：只写几条关键技术决策。full：使用 BMAD 架构技能生成完整架构。',
+  split: '只拆有用户价值的任务，遵守 inputs.max；tasks 必须输出 [{id,title,goal,acceptance:[验收要点],agent,depends_on:[任务id]}]。不要派同步文档、核对就绪、准备报告之类流程杂活。',
+  implement: '按指令实现可运行的产品。自己完成与改动相称的快速检查。注意界面好看好用。',
+  test: '验证关注点，报告实际命令和证据；界面使用下面的 ui-check 工具。pass 明确表示测试是否通过，不修产品代码。',
+  review: '独立读实现代码和现有验证结果，找实际问题。不要修改产品代码；pass 表示是否可通过，findings 描述位置、原因和影响。',
+  crosscheck: '逐条验收，报告每条验收要点的方法、结果和证据。你是非实现者，不改产品代码；pass 表示是否全部通过。',
+  compare: '独立提出一版方案，说明取舍和适用条件。不要写产品代码。将方案写在独立文件中，不覆盖另一人的方案。',
+  fix: '逐条处理 findings，修改后做针对性的验证；说明哪些已修复、哪些仍待处理。',
+  doc: '只写用户需要的使用说明或 README，内容与实际实现一致。',
+};
+function componentTask(p, callId, resultPath, agentId, variant) {
+  const st = loadState(p), c = st.components.find(x => x.id === callId), def = componentDef(c.component), have = scanSkills(p.root);
+  const recommended = (def.skills?.[c.depth] || []).map(name => have.find(x => x.name === name)?.id).filter(Boolean);
+  const chosen = [...new Set([...(c.inputs.skills || []), ...recommended, ...(agentId === st.leader ? st.leaderSkills || [] : [])])];
+  const deps = st.components.filter(x => c.depends_on.includes(x.id)).map(x => ({ id: x.id, component: x.component, result: x.result }));
+  const variants = variant === '合并' ? st.runs.filter(r => (c.runIds || []).includes(r.id) && r.variant !== '合并').map(r => ({ agent: r.agent, result: readAgentResult(p, r) })) : null;
+  return `# 组件任务：${def.name}${variant ? ' · ' + variant : ''}
+项目根目录：${p.root}
+调用 id：${c.id}；执行 agent：${agentId}；深度：${c.depth || '按任务需要'}
+调用原因：${c.why}
+
+## 老板需求原文
+${requirementText(p)}
+## 指令与输入
+${JSON.stringify(c.inputs, null, 2)}
+${variants ? `你是 Leader。比较下面两份独立方案，合并成可执行结论并说明取舍。\n${JSON.stringify(variants, null, 2)}` : COMPONENT_TASKS[c.component]}
+${c.component === 'compare' && !variants ? `本方案产出文件使用 ${c.id}-${agentId} 前缀，避免与另一位重叠。` : ''}
+## 依赖的结果
+${JSON.stringify(deps, null, 2)}
+## 老板留言和全局笔记
+${JSON.stringify(st.leaderBoard?.answers || [])}
+${st.leaderBoard?.notes || ''}
+## 改动范围
+${JSON.stringify(componentWrites(c))}（空数组：不改产品实现，可保存本组件的测试/报告产出）
+${skillsPrompt(p, chosen)}
+## 公共约束
+${commonRules(p)}
+- 组件任务自主执行，不等待老板批准计划；大方向不明确时在 open_questions 写清楚，交给 Leader 调用澄清组件。
+- 不改 sprint-status.yaml，不改 _bmad-output/panel/ 中的调度文件；只允许写下面指定的结果 JSON。
+- UI 无头测试：node ${UI_CHECK} --root <项目根目录> --steps <步骤.json> --out <结果.json> --shot <截图.png>
+## 统一结果（必须）
+把 JSON 写到 ${resultPath}（UTF-8，无 Markdown 包裹）：
+{"summary":"实际完成情况和验证结果","artifacts":["项目内相对路径"],"findings":[],"tasks":[],"pass":true,"open_questions":[]}
+可省略 findings/tasks/pass/open_questions；summary 和 artifacts 必须保留。编码损坏或结构不合法会被判失败。
+`;
+}
+function finishComponentRun(p, run, result, patch) {
+  const st = loadState(p), c = st.components.find(x => x.id === run.callId); if (!c) return;
+  if (['failed', 'cancelled'].includes(c.status)) return;
+  if (patch.status === 'cancelled') { c.status = 'cancelled'; c.endedAt = now(); c.error = '已取消'; saveState(p, st); return; }
+  const ok = patch.status === 'finished' && componentResultValid(result) && !hasBrokenEncoding(result) && result.pass !== false;
+  if (run.bootstrap && ok) {
+    if (!st.wf?.running) { c.status = 'pending'; c.startedAt = null; saveState(p, st); return; }
+    try { enqueue({ project: p.root, kind: 'component', callId: c.id, agentId: c.agent }); return; } catch (e) { patch.error = e.message; }
+  }
+  if (c.component === 'compare') {
+    const runs = st.runs.filter(r => (c.runIds || []).includes(r.id));
+    if (runs.some(r => ['queued', 'running'].includes(r.status))) return;
+    if (runs.length < 2) return;
+    if (run.variant !== '合并' && runs.every(r => r.status === 'finished' && componentResultValid(readAgentResult(p, r)) && readAgentResult(p, r).pass !== false && !hasBrokenEncoding(readAgentResult(p, r)))) {
+      saveState(p, st);
+      try { enqueue({ project: p.root, kind: 'component', callId: c.id, agentId: st.leader, variant: '合并' }); return; } catch (e) { patch.error = e.message; }
+    } else if (run.variant !== '合并') patch.error = '至少一份对比方案失败';
+  }
+  const success = ok && !patch.error;
+  c.status = success ? 'done' : 'failed'; c.endedAt = now(); c.result = result || null;
+  c.error = success ? null : patch.error || (hasBrokenEncoding(result) ? '组件结果编码损坏' : result?.pass === false ? '组件结果未通过（pass=false）' : '组件结果 JSON 不符合统一格式');
+  if (c.component === 'split' && success && (!Array.isArray(result.tasks) || (c.inputs.max && result.tasks.length > c.inputs.max) || result.tasks.some(t => !t || typeof t.title !== 'string' || typeof t.goal !== 'string' || !Array.isArray(t.acceptance) || !Array.isArray(t.depends_on) || typeof t.agent !== 'string'))) { c.status = 'failed'; c.error = '拆分结果 tasks 缺少标题、目标、验收要点、建议 agent、依赖，或超出 max'; }
+  saveState(p, st); componentHistoryCache.at = 0; if (c.status === 'failed') componentFailureGuard(p, c);
+}
+function componentLeaderBrief(p, resultPath) {
+  const st = loadState(p), L = st.leaderBoard || {}, calls = componentCalls(p, st), agents = loadAgents().filter(a => a.available);
+  return `# Leader 组件编排简报
+项目根目录：${p.root}
+你是完全自主的 Leader，边做边决定下一步，无需先向老板确认计划。只编排和判断，不亲自写产品代码。
+## 需求原文
+${requirementText(p)}
+## 老板留言与回答
+${JSON.stringify(L.answers || [], null, 2)}
+## 原则
+${COMPONENT_PRINCIPLES}
+## 参考配方（仅供参考）
+${savedReferenceBrief(st)}
+- 小需求：implement → test → deliver。
+- 中等：spec(brief) → split → 多个 implement 并行 → review → fix → deliver。
+- 大：spec(full) → design(full) → split → 按实际需要实现、测试、验收 → deliver。
+## 可调用组件（耗时是事实数据/无历史时为估计，不是规则）
+${JSON.stringify(componentCatalog(p), null, 2)}
+## 已调用时间线（包含 why、状态、耗时、产出、问题）
+${JSON.stringify(calls.map(c => ({ ...c, elapsedMs: Date.parse(c.endedAt || now()) - Date.parse(c.startedAt || c.createdAt) })), null, 2)}
+## 正在运行/排队
+${JSON.stringify(calls.filter(c => ['running', 'queued', 'pending'].includes(c.status)).map(c => ({ id: c.id, component: c.component, agent: c.agent, status: c.status, lastLine: c.lastLine })))}
+## 全局笔记
+${L.notes || '（无）'}
+## 可用 agent 与模型、特长
+${agents.map(a => `- ${a.id}｜${a.effectiveModel || '默认模型'}｜${a.strengths}`).join('\n')}
+并发上限：${config.maxParallel || 1}（Leader 唤醒不占名额）；已调用 ${calls.length}/${st.componentCallLimit || 80}。
+## 动作
+- {"type":"call","id":"c7","component":"implement","agent":"codex","depth":"brief","inputs":{"instructions":"具体指令","writes":["index.html"],"target":"稳定目标名"},"depends_on":["c3"],"why":"一句话"}
+- 一轮可多个 call，先声明依赖，再声明引用它的调用。无依赖且改动范围不重叠时并行。id 项目内唯一，重做再 call 新 id。依赖只在成功后启动；失败后改用新的成功调用作为依赖，别让旧 pending 调用永久等待（必要时用 cancel_call）。
+- split 后的 implement/fix 请在 inputs.task_id 填对应 tasks[].id，供任务看板关联状态。
+- {"type":"cancel_call","id":"c7","why":"已被新调用取代"}：取消尚未完成的调用。
+- {"type":"ask_human","question":"只有真拿不准的大方向才问"} 是 clarify 快捷方式。
+- {"type":"finish","summary":"交付说明：如何打开使用、实现了什么、已知限制"} 是 deliver 快捷方式。
+- deliver / finish 在所有调用停止后交付；已有失败不强制重做，由你判断是否影响需求。不要 approve_node / rerun_node / set_status / dispatch，不使用 Story 或 sprint-status，也没有验收档位。
+- 评审/交叉验收使用不同于目标实现者的 agent；方案对比 inputs.agents 为两个不同可用 agent，面板自动执行两版并让 Leader 合并。
+- test 可与实现使用同一 agent；界面测试工具：node ${UI_CHECK} --root <项目> --steps <步骤.json> --out <结果.json>。
+- 没有可做的事、只等正在运行的组件时 actions=[]。失败和编码损坏要读清原因；同组件同目标连续失败两次会问老板；调用总数到上限会暂停问老板。
+${FORBIDDEN}
+## 输出
+把 JSON 写入 ${resultPath}（UTF-8，无 Markdown 包裹）：
+{"notes":"更新全局笔记：事实、风险和下一步","progress":{"is_done":false,"is_looping":false,"making_progress":true,"reason":"一句话"},"actions":[]}
+`;
+}
+function applyComponentTick(p, run, result) {
+  let st = loadState(p), L = st.leaderBoard ||= {}; L.ticks = (L.ticks || 0) + 1; L.lastTickAt = run.startedAt || run.createdAt;
+  if (!st.wf?.running) { L.pending = false; saveState(p, st); return; }
+  const pending = L.pending; L.pending = false;
+  const allowed = new Set(['call', 'ask_human', 'finish', 'cancel_call']);
+  const valid = result && !hasBrokenEncoding(result) && typeof result.notes === 'string' && result.progress && typeof result.progress === 'object' && ['is_done', 'is_looping', 'making_progress'].every(k => typeof result.progress[k] === 'boolean') && typeof result.progress.reason === 'string' && Array.isArray(result.actions) && result.actions.every(a => a && allowed.has(a.type));
+  if (!valid) {
+    L.fails = (L.fails || 0) + 1; if (L.fails >= 3) L.error = 'Leader 连续 3 轮动作 JSON 不合法或编码损坏，已暂停';
+    saveState(p, st); if (!L.error) scheduleTick(p, '上一轮动作 JSON 不合法，请修正'); return;
+  }
+  L.notes = result.notes; L.progress = result.progress; saveState(p, st);
+  const log = { at: now(), run: run.id, progress: result.progress, actions: [] }; let progress = false, invalid = false;
+  for (const raw of result.actions) {
+    const a = { ...raw }; let outcome = 'ok';
+    try {
+      if (a.type === 'call') addComponentCall(p, a, { defer: true });
+      else if (a.type === 'cancel_call') cancelComponentCall(p, a.id, a.why || 'Leader 取消');
+      else if (a.type === 'ask_human') addComponentCall(p, { id: `ask-${run.id}`, component: 'clarify', inputs: { questions: [a.question] }, why: 'Leader 请求澄清' }, { defer: true });
+      else if (a.type === 'finish') addComponentCall(p, { id: `deliver-${run.id}`, component: 'deliver', inputs: { summary: a.summary || '' }, depends_on: loadState(p).components.filter(c => c.status === 'done').map(c => c.id), why: '需求已满足，交付给老板' }, { defer: true });
+      progress = true;
+    } catch (e) { outcome = '失败：' + e.message; invalid = true; }
+    log.actions.push({ ...a, outcome });
+  }
+  st = loadState(p); L = st.leaderBoard; L.log = [...(L.log || []), log].slice(-80); L.fails = invalid ? (L.fails || 0) + 1 : 0;
+  if (L.fails >= 3) L.error = 'Leader 连续 3 轮动作无效，已暂停';
+  const active = st.components.some(c => ['queued', 'running'].includes(c.status));
+  L.idleTicks = progress || active ? 0 : (L.idleTicks || 0) + 1;
+  if (L.idleTicks > 2) L.error = 'Leader 连续几轮没有推进，已暂停，等你看一下';
+  saveState(p, st); advanceComponents(p);
+  const after = loadState(p), waitingOnly = after.components.some(c => c.status === 'pending') && !after.components.some(c => ['queued', 'running'].includes(c.status));
+  if (pending || invalid || waitingOnly || (!active && !after.leaderBoard.finished && !after.leaderBoard.error)) scheduleTick(p, invalid ? '动作无效，请修正' : waitingOnly ? '依赖未满足，请处理阻塞调用' : '继续推进');
+}
+
 // ---------- 工作流（Dify 式画布） ----------
 const WF_TEMPLATES = path.join(HERE, 'workflows');
 const automatic = st => ['auto', 'leader'].includes(st.mode);
@@ -1285,6 +1782,7 @@ const requirementText = p => exists(p.requirement) ? readMd(p.requirement).trim(
 const requirementId = text => createHash('sha256').update(text).digest('hex');
 const isQuickWorkflow = g => g.template === 'quick-build' || g.id === 'quick-build';
 function workflowStarted(p, st = loadState(p)) {
+  if (isComponents(st)) return !!st.wf?.substantiveStartedAt || !!st.wf?.startedAt || !!st.components.length || st.runs.some(r => r.kind === 'tick');
   // Filling the input is not substantive execution (nodeStates derives start=done).
   const g = readWorkflow(p), states = nodeStates(p, st, g);
   return !!st.wf?.substantiveStartedAt || g.nodes.some(n => n.type !== 'start' && ['done', 'running', 'waiting'].includes(states[n.id]?.status)) ||
@@ -1302,7 +1800,7 @@ function ensureLeader(p) {
   return st;
 }
 function triageSnapshot(p, st) {
-  return { triage: st.triage || null, triagePending: !!st.triagePending, workflowStarted: workflowStarted(p, st), leaderWarning: leaderWarning(st), leaderAutoSelection: st.leaderAutoSelection || null };
+  return { triage: isComponents(st) ? null : st.triage || null, triagePending: !isComponents(st) && !!st.triagePending, workflowStarted: workflowStarted(p, st), leaderWarning: leaderWarning(st), leaderAutoSelection: st.leaderAutoSelection || null };
 }
 function triageTask(p, resultPath) {
   return `# 需求分诊（Leader）
@@ -1337,6 +1835,7 @@ function localTriage(p, why) {
 }
 function applyTriageTemplate(p, template) {
   const st = loadState(p);
+  if (isComponents(st)) throw new Error('组件模式不使用分诊模板');
   if (workflowStarted(p, st)) throw new Error('工作流已开始实质运行，不能自动更换模板');
   const id = template || st.triage?.template;
   if (!['quick-build', 'bmad-standard', 'proposal-pk'].includes(id)) throw new Error('没有这个分诊模板');
@@ -1354,6 +1853,7 @@ function applyTriageTemplate(p, template) {
 }
 function requestTriage(p) {
   let st = loadState(p);
+  if (isComponents(st) || st.workflowSelection) return false;
   const text = requirementText(p);
   if (workflowStarted(p, st)) return false;
   if (!text) {
@@ -1405,6 +1905,7 @@ function finishQuickReview(p, result) {
   saveState(p, st);
 }
 function readWorkflow(p) {
+  const st = loadState(p); if (isComponents(st)) return componentGraph(p, st);
   const g = readJson(p.workflow, null);
   if (g && Array.isArray(g.nodes)) return g;
   return readJson(path.join(WF_TEMPLATES, 'bmad-standard.json'), { nodes: [], edges: [] });
@@ -1418,6 +1919,8 @@ function storyProgress(p) {
   return { total: keys.length, done: keys.filter(k => k && sprint[k] === 'done').length };
 }
 function nodeStates(p, st, g) {
+  if (isComponents(st)) return componentStates(p, st);
+  if (st.fixedRecipe) { const states = componentStates(p, st); return Object.fromEntries(g.nodes.map(n => [n.id, states[n.id] || { status: 'idle' }])); }
   const rec = (st.wf && st.wf.nodes) || {}, out = {};
   const reqFilled = exists(p.requirement) && readMd(p.requirement).trim();
   for (const n of g.nodes) {
@@ -1446,6 +1949,10 @@ function nodeStates(p, st, g) {
 }
 function setNode(p, id, patch) { const st = loadState(p); st.wf = st.wf || { nodes: {} }; st.wf.nodes = st.wf.nodes || {}; st.wf.nodes[id] = { ...(st.wf.nodes[id] || {}), ...patch }; saveState(p, st); }
 const isLeaderRef = a => !a || a === 'leader';
+function missingPresetSkills(p, n) {
+  const name = { prd: 'bmad-prd', architecture: 'bmad-architecture', epics: 'bmad-create-epics-and-stories' }[n.config?.preset];
+  return name && !exists(path.join(p.root, skillsBase(p), name, 'SKILL.md')) ? [name] : [];
+}
 function startNode(p, n, feedback) {
   const st = loadState(p), c = n.config || {};
   if (n.type !== 'start') { st.wf = st.wf || { nodes: {} }; st.wf.substantiveStartedAt ||= now(); saveState(p, st); }
@@ -1465,11 +1972,12 @@ function startNode(p, n, feedback) {
   if (n.type === 'agent') {
     const who = isLeaderRef(c.agent) ? st.leader : c.agent;
     if (!who) return setNode(p, n.id, { status: 'failed', note: '没有选 agent，也没有设 leader' });
-    try { enqueue({ project: p.root, kind: 'node', nodeId: n.id, agentId: who, feedback }); }
+    try { enqueue({ project: p.root, kind: 'node', nodeId: n.id, agentId: who, feedback, bootstrap: !!missingPresetSkills(p, n).length }); }
     catch (e) { setNode(p, n.id, { status: 'failed', note: e.message }); }
   }
 }
 function advanceWorkflow(p) {
+  if (isComponents(loadState(p)) || loadState(p).fixedRecipe) return advanceComponents(p);
   for (let round = 0; round < 30; round++) {
     let st = loadState(p);
     if (!st.wf || !st.wf.running) return;
@@ -1521,7 +2029,7 @@ ${isQuickWorkflow(g) && nodeId === 'review' ? '{"verdict":"approve 或 changes",
 }
 function wfSnapshot(p) {
   const st = loadState(p), g = readWorkflow(p);
-  return { ...triageSnapshot(p, st), graph: g, states: nodeStates(p, st, g), running: !!(st.wf && st.wf.running), templates: listTemplates(), requirement: exists(p.requirement) ? readMd(p.requirement) : '' };
+  return { ...triageSnapshot(p, st), orchestration: st.orchestration, fixedRecipe: !!st.fixedRecipe, components: componentCatalog(p), calls: componentCalls(p, st), graph: g, states: nodeStates(p, st, g), running: !!(st.wf && st.wf.running), templates: listTemplates(), requirement: exists(p.requirement) ? readMd(p.requirement) : '' };
 }
 
 // ---------- 自动模式（Leader 自动评审、自动选技能、自动派发） ----------
@@ -1603,6 +2111,7 @@ function autoAfterRun(p, run, result) {
 }
 function autoDispatch(p) {
   const st = loadState(p);
+  if (isComponents(st) || st.fixedRecipe) return;
   if (!isAuto(st) || !st.leader) return;
   const g = readWorkflow(p), ns = nodeStates(p, st, g), dev = g.nodes.find(n => n.type === 'dev');
   if (!dev || ns[dev.id].status !== 'running' || !exists(p.epics) || !exists(p.sprint)) return;
@@ -1629,6 +2138,7 @@ function autoDispatch(p) {
 }
 function resumeAutomaticNodes(p) {
   const st = loadState(p);
+  if (isComponents(st) || st.fixedRecipe) return advanceComponents(p);
   if (!automatic(st) || !st.leader) return;
   const g = readWorkflow(p), ns = nodeStates(p, st, g);
   for (const n of g.nodes) {
@@ -1659,8 +2169,8 @@ function setMode(p, mode, rounds) {
 // ---------- Leader 统筹模式 ----------
 // 参考 Magentic-One 的 Orchestrator：Task Ledger（全局笔记：事实、计划、风险）+ Progress Ledger（每轮判断是否完成、
 // 是否在兜圈子、下一步谁做什么）；以及 LangGraph supervisor：成员做完都回到 Leader，由 Leader 决定下一步。
-const isLeaderMode = st => st.mode === 'leader';
-const KIND_CN = { triage: '需求分诊', plan: '分配', implement: '执行 Story', review: '评审', node: '工作流节点', nodereview: '节点评审', task: '临时任务', stage: '阶段', tick: 'Leader 唤醒' };
+const isLeaderMode = st => st.mode === 'leader' || (isComponents(st) && st.mode === 'auto');
+const KIND_CN = { component: '组件', triage: '需求分诊', plan: '分配', implement: '执行 Story', review: '评审', node: '工作流节点', nodereview: '节点评审', task: '临时任务', stage: '阶段', tick: 'Leader 唤醒' };
 const clip = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n) + '…' : s; };
 const resultOf = (p, r) => readAgentResult(p, r);
 function fullStoryKey(p, k) {
@@ -1730,6 +2240,7 @@ ${noRepeat}`;
 ${noRepeat}`;
 }
 function leaderBrief(p, resultPath) {
+  if (isComponents(loadState(p))) return componentLeaderBrief(p, resultPath);
   const st = loadState(p), snap = snapshot(p.root), g = readWorkflow(p), ns = nodeStates(p, st, g), L = st.leaderBoard || {};
   const lastTick = [...st.runs].reverse().find(r => r.kind === 'tick' && r.hasResult), lastResult = readAgentResult(p, lastTick);
   const encodingReminder = L.encodingBroken || hasBrokenEncoding({ notes: L.notes, summary: L.finished?.summary }) || hasBrokenEncoding(lastResult)
@@ -1850,8 +2361,9 @@ ${FORBIDDEN}
 }
 function scheduleTick(p, why) {
   const st = loadState(p);
+  if (st.fixedRecipe) return;
   if (!isLeaderMode(st) || !st.leader) return;
-  if (!st.wf?.running || !requirementText(p) || st.triagePending || requestTriage(p) || isQuickWorkflow(readWorkflow(p))) return;
+  if (!st.wf?.running || !requirementText(p) || (!isComponents(st) && (st.triagePending || requestTriage(p) || isQuickWorkflow(readWorkflow(p))))) return;
   const L = st.leaderBoard = st.leaderBoard || {};
   if (L.finished || (L.ask && !L.ask.answered) || L.error) return;
   if (st.runs.some(r => r.kind === 'tick' && ['queued', 'running'].includes(r.status))) { L.pending = true; saveState(p, st); return; }
@@ -1871,6 +2383,7 @@ function approveNodeCore(p, id) {
   if ((n.config || {}).preset === 'epics') refreshSprint(p).then(after).catch(e => { console.error(e.message); after(); }); else after();
 }
 function applyTick(p, run, result) {
+  if (isComponents(loadState(p))) return applyComponentTick(p, run, result);
   const st = loadState(p), L = st.leaderBoard = st.leaderBoard || {};
   L.ticks = (L.ticks || 0) + 1;
   L.lastTickAt = run.startedAt || run.createdAt; // 唤醒期间完成的任务留到下一轮
@@ -1979,12 +2492,374 @@ function storyTimeline(p) {
   });
 }
 
+// ---------- 可复用工作流（只保存定义，不保存运行状态或认证） ----------
+const PRIVATE_FIELD = /^(?:key|env|proxy|headers?|result|results|status|runIds?|createdAt|startedAt|endedAt|finishedAt|model)$|api[_-]?key|secret|token|password|authorization|cookie|credentials?/i;
+function portableValue(value, projectRoot = null) {
+  const secrets = Object.values(readEnvFile('secrets.env')).filter(v => typeof v === 'string' && v.length >= 8);
+  function clean(v) {
+    if (typeof v === 'string') {
+      let text = v;
+      for (const secret of secrets) text = text.split(secret).join('[已移除密钥]');
+      if (projectRoot) for (const root of [projectRoot, projectRoot.replace(/\\/g, '/'), projectRoot.replace(/\//g, '\\')]) text = text.split(root + path.sep).join('').split(root + '/').join('').split(root + '\\').join('').split(root).join('.');
+      return text.replace(/\b(?:(?:sk|sess)-[A-Za-z0-9_-]{8,}|(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]{8,}|AIza[A-Za-z0-9_-]{20,})/g, '[已移除密钥]')
+        .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, 'Bearer [已移除密钥]')
+        .replace(/\b(key|secret|token|api[_-]?key|access[_-]?token|refresh[_-]?token|password|authorization)\s*[:=]\s*["']?[^\s,"'};]+/gi, '$1=[已移除密钥]')
+        .replace(/[A-Za-z]:[\\/][^\s\n"'<>|，。；）)\]}]+/g, m => path.win32.basename(m.replace(/\//g, '\\')) || '.')
+        .replace(/\\\\[^\s\n"'<>|，。；）)\]}]+/g, m => path.win32.basename(m) || '.')
+        .replace(/(^|[\s"'=:(])\/(?!\/)[^\s\n"'<>，。；）)\]}]+/g, (match, prefix) => prefix + (path.posix.basename(match.slice(prefix.length)) || '[项目相对路径]'))
+        .replace(/(^|[\s"'=:(])\\(?!\\)[^\s\n"'<>，。；）)\]}]+/g, (match, prefix) => prefix + (path.win32.basename(match.slice(prefix.length)) || '[项目相对路径]'));
+    }
+    if (Array.isArray(v)) return v.map(clean);
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).filter(([k]) => !PRIVATE_FIELD.test(k) && !['__proto__', 'constructor', 'prototype'].includes(k)).map(([k, x]) => [k, clean(x)]));
+    return v;
+  }
+  return clean(value);
+}
+function cleanGraph(graph, projectRoot = null) {
+  if (!graph || !Array.isArray(graph.nodes) || !graph.nodes.length || graph.nodes.length > 300 || !Array.isArray(graph.edges)) throw new Error('工作流需要非空 nodes 和 edges 数组（最多 300 个节点）');
+  const g = { name: String(graph.name || ''), ...(typeof graph.id === 'string' ? { id: graph.id } : {}), ...(typeof graph.template === 'string' ? { template: graph.template } : {}), nodes: graph.nodes.map(n => ({ id: n.id, type: n.type, title: String(n.title || n.id), x: Number(n.x) || 0, y: Number(n.y) || 0, config: portableValue(n.config || {}, projectRoot) })), edges: graph.edges.map(e => ({ from: e.from, to: e.to })) };
+  const ids = new Set(g.nodes.map(n => n.id));
+  if (ids.size !== g.nodes.length || g.nodes.some(n => typeof n.id !== 'string' || !/^[\w-]{1,80}$/.test(n.id) || !['start', 'end', 'agent', 'human', 'dev'].includes(n.type))) throw new Error('节点 id 或节点类型不合法');
+  if (g.edges.some(e => !ids.has(e.from) || !ids.has(e.to) || e.from === e.to)) throw new Error('连线必须引用不同的有效节点');
+  const seen = new Set(), open = new Set();
+  function visit(id) { if (open.has(id)) throw new Error('工作流不能有循环依赖'); if (seen.has(id)) return; open.add(id); for (const e of g.edges.filter(e => e.from === id)) visit(e.to); open.delete(id); seen.add(id); }
+  for (const id of ids) visit(id);
+  return portableValue(g, projectRoot);
+}
+function cleanRecipe(recipe, projectRoot = null) {
+  const source = Array.isArray(recipe) ? recipe : recipe?.calls;
+  if (!Array.isArray(source) || !source.length || source.length > 300) throw new Error('配方需要非空 calls 数组（最多 300 个调用）');
+  const ids = new Set(['start']);
+  const calls = source.map(c => {
+    if (!componentDef(c.component) || !/^[\w-]{1,64}$/.test(c.id || '') || ids.has(c.id) || c.id === 'end') throw new Error('配方组件或调用 id 不合法');
+    const deps = c.depends_on || [];
+    if (!Array.isArray(deps) || deps.some(id => !ids.has(id))) throw new Error('配方依赖必须引用前面已声明的调用');
+    ids.add(c.id);
+    const call = portableValue({ id: c.id, component: c.component, depth: c.depth || null, agent: c.agent || 'leader', depends_on: deps, why: String(c.why || ''), inputs: c.component === 'deliver' ? {} : c.inputs || {} }, projectRoot);
+    if (!call.inputs || typeof call.inputs !== 'object' || Array.isArray(call.inputs) || typeof call.agent !== 'string') throw new Error('配方 inputs 必须是对象，agent 必须是 id');
+    const def = componentDef(c.component);
+    if (call.depth && call.depth !== 'brief' && !def.depthOptions?.includes(call.depth)) throw new Error('配方组件的深度不合法');
+    if (c.component === 'clarify' && (!Array.isArray(call.inputs.questions) || !call.inputs.questions.length || call.inputs.questions.some(q => typeof q !== 'string' || !q.trim()))) throw new Error('澄清配方需要非空 questions 数组');
+    if (c.component === 'compare' && (!Array.isArray(call.inputs.agents) || call.inputs.agents.length !== 2 || new Set(call.inputs.agents).size !== 2 || call.inputs.agents.some(a => typeof a !== 'string'))) throw new Error('方案对比配方需要两个不同 agent');
+    if (call.inputs.writes !== undefined && (!Array.isArray(call.inputs.writes) || call.inputs.writes.some(f => typeof f !== 'string' || path.win32.isAbsolute(f) || path.posix.isAbsolute(f) || f.split(/[\\/]/).includes('..')))) throw new Error('配方 writes 必须是项目相对路径数组');
+    if (call.inputs.skills !== undefined && (!Array.isArray(call.inputs.skills) || call.inputs.skills.some(s => typeof s !== 'string'))) throw new Error('配方 skills 必须是字符串数组');
+    return call;
+  });
+  return { calls };
+}
+function savedFile(id) {
+  if (typeof id !== 'string' || !/^[\p{L}\p{N}][\p{L}\p{N}_-]{0,99}$/u.test(id)) throw new Error('工作流 id 不合法');
+  return path.join(SAVED_WORKFLOWS, `${id}.json`);
+}
+function normalizeSaved(input, projectRoot = null) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('工作流 JSON 格式不对');
+  const name = portableValue(String(input.name || '').trim(), projectRoot).slice(0, 120);
+  if (!name) throw new Error('工作流名称不能为空');
+  if (!['template', 'recipe'].includes(input.kind)) throw new Error('kind 必须是 template 或 recipe');
+  const meta = { name, desc: portableValue(String(input.desc || ''), projectRoot).slice(0, 500), fit: portableValue(String(input.fit || ''), projectRoot).slice(0, 1000), kind: input.kind, createdAt: now(), from: portableValue(String(input.from || '导入文件'), projectRoot).slice(0, 120) };
+  return { ...meta, ...(input.kind === 'recipe' ? { recipe: cleanRecipe(input.recipe, projectRoot) } : { graph: cleanGraph(input.graph, projectRoot) }) };
+}
+function listSavedWorkflows() {
+  if (!isDir(SAVED_WORKFLOWS)) return [];
+  return fs.readdirSync(SAVED_WORKFLOWS).filter(f => f.endsWith('.json')).flatMap(f => { const w = readJson(path.join(SAVED_WORKFLOWS, f), null); return w && ['template', 'recipe'].includes(w.kind) ? [{ ...w, id: path.basename(f, '.json') }] : []; }).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+}
+function getSavedWorkflow(id) { const w = readJson(savedFile(id), null); if (!w) throw new Error('没有这个保存的工作流'); return { ...w, id }; }
+function storeSavedWorkflow(input, projectRoot = null) {
+  const w = normalizeSaved(input, projectRoot), id = `${w.name.replace(/[^\p{L}\p{N}_-]/gu, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'workflow'}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  writeJson(savedFile(id), w); broadcast('workflow', {}); return { ...w, id };
+}
+function savedReferenceBrief(st) {
+  const w = st.workflowReference;
+  return w ? `老板保存过的流程：${w.name}${w.desc ? '；' + w.desc : ''}。仅供参考，按本次需求调整。\n${JSON.stringify(w.kind === 'recipe' ? w.recipe : w.graph, null, 2)}\n` : '';
+}
+function recipeGraph(w) {
+  const calls = w.recipe.calls, nodes = [{ id: 'start', type: 'start', title: '本次需求', x: 70, y: 90, config: {} }], edges = [], levels = new Map([['start', 0]]), rows = new Map();
+  for (const c of calls) {
+    const deps = c.depends_on.length ? c.depends_on : ['start'], level = 1 + Math.max(...deps.map(id => levels.get(id) || 0)), row = rows.get(level) || 0; rows.set(level, row + 1); levels.set(c.id, level);
+    nodes.push({ id: c.id, type: 'component', title: componentDef(c.component).name, x: 70 + level * 310, y: 90 + row * 180, config: { component: c.component, depth: c.depth, agent: c.agent, why: c.why, inputs: c.inputs } });
+    for (const from of deps) edges.push({ from, to: c.id });
+  }
+  nodes.push({ id: 'end', type: 'end', title: '完成', x: 70 + (Math.max(...levels.values()) + 1) * 310, y: 90, config: {} });
+  for (const c of calls.filter(c => !calls.some(x => x.depends_on.includes(c.id)))) edges.push({ from: c.id, to: 'end' });
+  return { name: w.name, nodes, edges, savedWorkflow: w.id };
+}
+function projectHasActiveRuns(p) { return loadState(p).runs.some(r => ['running', 'queued'].includes(r.status)); }
+function beginTemplateRound(p, st, graph) {
+  // A new requirement must not inherit "done" Stories or a previous dispatch plan.
+  // Keep their original files and runtime metadata together for historical review.
+  const hasDev = graph.nodes.some(n => n.type === 'dev'), hasEpics = graph.nodes.some(n => n.config?.preset === 'epics');
+  if (!hasDev && !graph.nodes.some(n => n.config?.preset)) return;
+  const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, dir = path.join(p.panel, 'workflow-rounds', id);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const [file, name] of [[p.plan, 'plan.json'], [p.sprint, 'sprint-status.yaml']]) if (exists(file)) fs.copyFileSync(file, path.join(dir, name));
+  writeJson(path.join(dir, 'runtime.json'), { at: now(), assignments: st.assignments || {}, feedback: st.feedback || {}, autoRounds: st.autoRounds || {}, leaderInstr: st.leaderInstr || {}, acceptance: st.acceptance || {}, stages: st.stages || {}, wf: st.wf || null });
+  if (exists(p.plan)) fs.unlinkSync(p.plan);
+  if (exists(p.sprint)) {
+    if (hasEpics) fs.unlinkSync(p.sprint); // The epics node generates this round's status file.
+    else if (hasDev) for (const key of Object.keys(readSprint(p.sprint)).filter(k => /^\d+-\d+-|^epic-\d+$/.test(k))) writeSprintStatus(p.sprint, key, 'backlog');
+  }
+  st.assignments = {}; st.feedback = {}; st.autoRounds = {}; st.leaderInstr = {}; st.acceptance = {}; st.stages = {};
+  st.templateRound = { id, startedAt: now(), archive: path.relative(p.root, dir).replace(/\\/g, '/') };
+}
+function applySavedWorkflow(p, id, usage = 'reference') {
+  if (!['reference', 'fixed'].includes(usage)) throw new Error('用法必须是 reference 或 fixed');
+  if (projectHasActiveRuns(p)) throw new Error('项目有运行中的任务，请先完成或停止');
+  const w = getSavedWorkflow(id), st = loadState(p);
+  st.workflowSelection = { type: 'saved', id, usage }; delete st.fixedRecipe;
+  if (st.components.length) st.componentArchive = [...(st.componentArchive || []), ...st.components].slice(-500);
+  st.components = []; st.leaderBoard = { answers: st.leaderBoard?.answers || [], notes: '' }; st.wf = { nodes: {}, running: false };
+  delete st.triage; delete st.triageInput; delete st.triagePending;
+  if (usage === 'reference') { st.orchestration = 'components'; st.mode = 'leader'; st.workflowReference = w; }
+  else {
+    st.orchestration = 'template'; st.mode = 'auto'; delete st.workflowReference;
+    if (w.kind === 'template') beginTemplateRound(p, st, w.graph);
+    writeJson(p.workflow, w.kind === 'recipe' ? recipeGraph(w) : { ...w.graph, savedWorkflow: id });
+    if (w.kind === 'template') st.wf.nodes = Object.fromEntries(w.graph.nodes.map(n => [n.id, { status: 'idle' }]));
+    if (w.kind === 'recipe') {
+      st.fixedRecipe = true;
+      st.components = w.recipe.calls.map(c => ({ ...structuredClone(c), name: componentDef(c.component).name, agent: c.agent === 'leader' ? st.leader : c.agent, status: 'pending', createdAt: now(), runIds: [] }));
+    }
+  }
+  saveState(p, st); ensureLeader(p);
+  if (st.fixedRecipe) { const fresh = loadState(p); for (const c of fresh.components) c.agent ||= fresh.leader; saveState(p, fresh); }
+  broadcast('workflow', {}); broadcast('state', {}); return wfSnapshot(p);
+}
+
+// ---------- 进程内调度：Asia/Shanghai，五段 cron，不补跑关闭期间的任务 ----------
+const SCHEDULE_ZONE = 'Asia/Shanghai', MINUTE = 60000, DAY = 86400000, ZONE_OFFSET = 8 * 3600000;
+let schedulerClock = SCHEDULER_TEST && process.env.PANEL_FAKE_NOW ? Date.parse(process.env.PANEL_FAKE_NOW) : null;
+const schedulerNow = () => schedulerClock ?? Date.now();
+const scheduleData = readJson(SCHEDULES_FILE, { version: 1, tasks: [], lastCheckAt: null });
+if (!Array.isArray(scheduleData.tasks)) scheduleData.tasks = [];
+const persistSchedules = () => writeJson(SCHEDULES_FILE, scheduleData);
+const scheduleRunningCount = () => scheduleData.tasks.filter(t => t.running).length;
+function cronField(text, min, max, sunday = false) {
+  const values = new Set();
+  for (const part of text.split(',')) {
+    if (!part || !/^(?:\*|\d+(?:-\d+)?)(?:\/\d+)?$/.test(part)) throw new Error(`cron 字段不合法：${text}`);
+    const [base, stepText] = part.split('/'), step = stepText === undefined ? 1 : Number(stepText);
+    if (!Number.isSafeInteger(step) || step < 1 || step > max - min + 1) throw new Error('cron 步长超出范围');
+    let first = min, last = max;
+    if (base !== '*') { const range = base.split('-').map(Number); first = range[0]; last = range.length > 1 ? range[1] : stepText ? max : first; }
+    if (first < min || last > max || first > last) throw new Error(`cron 数值超出 ${min}–${max}`);
+    for (let value = first; value <= last; value += step) values.add(sunday && value === 7 ? 0 : value);
+  }
+  return { values: [...values].sort((a, b) => a - b), any: text.startsWith('*') };
+}
+function parseCron(expression) {
+  const fields = String(expression || '').trim().split(/\s+/);
+  if (fields.length !== 5) throw new Error('cron 必须是 5 段：分 时 日 月 周');
+  return fields.map((f, i) => cronField(f, [0, 0, 1, 1, 0][i], [59, 23, 31, 12, 7][i], i === 4));
+}
+function cronDayMatches(parsed, d) {
+  if (!parsed[3].values.includes(d.getUTCMonth() + 1)) return false;
+  const dom = parsed[2].values.includes(d.getUTCDate()), dow = parsed[4].values.includes(d.getUTCDay());
+  return parsed[2].any ? dow : parsed[4].any ? dom : dom || dow;
+}
+function cronRange(expression, after, until = null) {
+  const c = parseCron(expression), local = new Date(after + ZONE_OFFSET), firstDay = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate()), limit = until === null ? firstDay + DAY * 366 * 8 : until + ZONE_OFFSET;
+  let count = 0, last = null;
+  for (let day = firstDay; day <= limit; day += DAY) {
+    const d = new Date(day); if (!cronDayMatches(c, d)) continue;
+    for (const hour of c[1].values) for (const minute of c[0].values) {
+      const at = day + hour * 3600000 + minute * MINUTE - ZONE_OFFSET;
+      if (at <= after || (until !== null && at > until)) continue;
+      if (until === null) return at;
+      count++; last = at;
+    }
+  }
+  if (until === null) throw new Error('cron 在未来 8 年内没有运行时间');
+  return { count, last };
+}
+function normalizeSchedule(raw, anchor = schedulerNow()) {
+  if (!raw || !['daily', 'weekly', 'interval', 'cron'].includes(raw.type)) throw new Error('请选择有效的运行频率');
+  if (raw.type === 'interval') { const hours = Number(raw.hours); if (!Number.isFinite(hours) || hours <= 0 || hours > 8760 || !Number.isInteger(hours * 3600000)) throw new Error('间隔小时必须大于 0，且不超过 8760'); return { type: 'interval', hours, anchorAt: new Date(Number.isFinite(Date.parse(raw.anchorAt)) ? Date.parse(raw.anchorAt) : anchor).toISOString() }; }
+  if (raw.type === 'cron') { const cron = String(raw.cron || '').trim(); parseCron(cron); cronRange(cron, anchor); return { type: 'cron', cron }; }
+  const time = String(raw.time || ''); if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new Error('时间应为 HH:MM（00:00–23:59）');
+  if (raw.type === 'weekly') { const weekday = Number(raw.weekday); if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) throw new Error('星期应为 0–6（0 是星期日）'); return { type: 'weekly', time, weekday }; }
+  return { type: 'daily', time };
+}
+function scheduleCron(s) { const [hour, minute] = s.time.split(':').map(Number); return `${minute} ${hour} * * ${s.type === 'weekly' ? s.weekday : '*'}`; }
+function nextOccurrence(s, after) {
+  if (s.type !== 'interval') return cronRange(s.type === 'cron' ? s.cron : scheduleCron(s), after);
+  const anchor = Date.parse(s.anchorAt), interval = s.hours * 3600000;
+  return anchor + Math.max(1, Math.floor((after - anchor) / interval) + 1) * interval;
+}
+function dueOccurrences(s, next, until) {
+  if (next > until) return { count: 0, last: null };
+  if (s.type === 'interval') { const count = Math.floor((until - next) / (s.hours * 3600000)) + 1; return { count, last: next + (count - 1) * s.hours * 3600000 }; }
+  return cronRange(s.type === 'cron' ? s.cron : scheduleCron(s), next - 1, until);
+}
+function scheduleSnapshot() { return { tasks: scheduleData.tasks, runningCount: scheduleRunningCount(), now: new Date(schedulerNow()).toISOString(), timezone: SCHEDULE_ZONE, templates: listTemplates(), savedWorkflows: listSavedWorkflows(), recent: (config.recent || []).filter(exists), projectsRoot: config.projectsRoot }; }
+function getSchedule(id) { const t = scheduleData.tasks.find(t => t.id === id); if (!t) throw new Error('没有这个定时任务'); return t; }
+function normalizeWorkflowChoice(raw = {}) {
+  if (!raw.type || raw.type === 'components') return { type: 'components' };
+  if (raw.type === 'saved') { getSavedWorkflow(raw.id); if (raw.usage && !['reference', 'fixed'].includes(raw.usage)) throw new Error('保存工作流的用法不正确'); return { type: 'saved', id: raw.id, usage: raw.usage || 'reference' }; }
+  if (raw.type === 'template') { const file = path.basename(String(raw.file || '')); if (!listTemplates().some(t => t.file === file)) throw new Error('没有这个内置模板'); return { type: 'template', file }; }
+  throw new Error('编排方式不正确');
+}
+function saveSchedule(raw) {
+  const old = raw.id ? getSchedule(raw.id) : null, name = String(raw.name || '').trim(); if (!name || name.length > 120) throw new Error('任务名称不能为空，最多 120 字');
+  if (!String(raw.input || '').trim()) throw new Error('需求 / 指令不能为空');
+  const target = raw.target || {}; if (!['new', 'existing'].includes(target.type)) throw new Error('请选择固定项目或每次新建项目');
+  if (target.type === 'existing' && (!target.project || !isDir(target.project))) throw new Error('固定项目目录不存在');
+  const schedule = normalizeSchedule({ ...raw.schedule, anchorAt: old?.schedule?.type === 'interval' && Number(raw.schedule?.hours) === old.schedule.hours ? old.schedule.anchorAt : undefined });
+  const t = { ...(old || { id: `schedule-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, createdAt: new Date(schedulerNow()).toISOString(), lastRun: null, history: [], missedCount: 0, lastMissedAt: null, running: null }), name, enabled: raw.enabled !== false, schedule, target: target.type === 'existing' ? { type: 'existing', project: path.resolve(target.project) } : { type: 'new' }, input: String(raw.input).trim(), workflow: normalizeWorkflowChoice(raw.workflow), updatedAt: now() };
+  t.nextRun = t.enabled ? new Date(nextOccurrence(schedule, schedulerNow())).toISOString() : null;
+  if (old) Object.assign(old, t); else scheduleData.tasks.push(t);
+  scheduleData.lastCheckAt = new Date(schedulerNow()).toISOString(); persistSchedules(); broadcast('schedule', { phase: 'updated', runningCount: scheduleRunningCount() }); return t;
+}
+function scheduleEvent(t, phase, item) { broadcast('schedule', { phase, name: t.name, taskId: t.id, runningCount: scheduleRunningCount(), result: item?.result, project: item?.project }); broadcast('state', {}); }
+function addScheduleHistory(t, item) {
+  const active = (t.history || []).find(h => h.id === t.running);
+  t.history = [...(t.history || []), item].slice(-100);
+  if (active && !t.history.includes(active)) t.history.unshift(active);
+  t.lastRun = item; return item;
+}
+function initializeScheduleProject(t) {
+  let dir = t.target.project;
+  if (t.target.type === 'new') {
+    const d = new Date(schedulerNow() + ZONE_OFFSET), pad = n => String(n).padStart(2, '0');
+    const base = `${slug(t.name).replace(/^\.+|\.+$/g, '').slice(0, 80) || '定时任务'}-${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}-${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}`;
+    dir = path.resolve(config.projectsRoot, base); let suffix = 2; while (exists(dir)) dir = path.resolve(config.projectsRoot, `${base}-${suffix++}`);
+    const p = P(dir); fs.mkdirSync(p.panel, { recursive: true }); copyTemplate('generic', dir, t.name, false);
+    const agentFile = path.join(dir, 'AGENTS.md');
+    if (exists(agentFile)) writeMd(agentFile, readMd(agentFile).replace(/（BMAD 工作流）/g, '（组件化编排）').split(/\r?\n/).filter(line => !/BMAD skill|BMAD 脚本|规划文档：|测试命令：由架构文档/.test(line)).join('\n') + '\n流程按本次所选编排执行，文档和代码只放在项目内。\n');
+    writeMd(p.requirement, t.input); const st = loadState(p); st.orchestration = 'components'; st.mode = 'leader'; saveState(p, st);
+  }
+  if (!isDir(dir)) throw new Error('目标项目目录不存在');
+  const p = P(path.resolve(dir));
+  if (projectHasActiveRuns(p) || (loadState(p).wf?.running && !loadState(p).leaderBoard?.finished)) throw new Error('跳过：目标项目还有未完成的工作');
+  if (t.target.type === 'existing') {
+    fs.mkdirSync(p.panel, { recursive: true });
+    const before = requirementText(p); writeMd(p.requirement, `${before}${before ? '\n\n' : ''}## 定时任务新需求（${new Date(schedulerNow()).toISOString()}）\n${t.input}\n`);
+  }
+  const st = loadState(p);
+  if (t.workflow.type === 'template') beginTemplateRound(p, st, readJson(path.join(WF_TEMPLATES, t.workflow.file), null));
+  st.mode = 'leader'; st.leaderBoard = { ...(st.leaderBoard || {}), finished: null, error: null, fails: 0, idleTicks: 0, pending: false, ticks: 0, ask: null, answers: [...(st.leaderBoard?.answers || []), { q: '（老板留言 / 定时任务新需求）', a: t.input, at: now() }] }; st.wf = { nodes: {}, running: false }; saveState(p, st); ensureLeader(p);
+  if (t.workflow.type === 'saved') applySavedWorkflow(p, t.workflow.id, t.workflow.usage);
+  else {
+    const fresh = loadState(p); delete fresh.fixedRecipe; delete fresh.workflowReference; delete fresh.triage; delete fresh.triageInput; delete fresh.triagePending;
+    if (fresh.components.length) fresh.componentArchive = [...(fresh.componentArchive || []), ...fresh.components].slice(-500);
+    fresh.components = []; fresh.workflowSelection = t.workflow;
+    if (t.workflow.type === 'template') { fresh.orchestration = 'template'; fresh.mode = 'auto'; const graph = readJson(path.join(WF_TEMPLATES, t.workflow.file), null); writeJson(p.workflow, graph); fresh.wf.nodes = Object.fromEntries(graph.nodes.map(n => [n.id, { status: 'idle' }])); }
+    else { fresh.orchestration = 'components'; fresh.mode = 'leader'; }
+    saveState(p, fresh);
+  }
+  return p;
+}
+function runSchedule(t, trigger = 'manual', scheduledAt = null) {
+  const item = { id: `history-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, startedAt: now(), endedAt: null, durationMs: null, status: 'running', result: '运行中', project: null, summary: '', scheduledAt, trigger };
+  if (t.running) { Object.assign(item, { endedAt: now(), durationMs: 0, status: 'skipped', result: '跳过：上次未完成' }); addScheduleHistory(t, item); persistSchedules(); scheduleEvent(t, 'skipped', item); return item; }
+  addScheduleHistory(t, item); t.running = item.id; persistSchedules();
+  try {
+    const p = initializeScheduleProject(t); item.project = p.root; const st = loadState(p);
+    if (!st.leader) throw new Error('没有可用 Leader，请配置项目 Leader 或登录可用 agent');
+    st.wf ||= { nodes: {} }; st.wf.running = true; st.wf.startedAt = now(); saveState(p, st); persistSchedules(); scheduleEvent(t, 'started', item);
+    advanceWorkflow(p); autoDispatch(p); scheduleTick(p, `定时任务：${t.name}`); settleSchedules();
+  } catch (e) { Object.assign(item, { endedAt: now(), durationMs: Date.now() - Date.parse(item.startedAt), status: e.message.startsWith('跳过：') ? 'skipped' : 'failed', result: e.message }); t.running = null; persistSchedules(); scheduleEvent(t, 'finished', item); }
+  return item;
+}
+function settleSchedules() {
+  let changed = false;
+  for (const t of scheduleData.tasks.filter(t => t.running)) {
+    const item = t.history.find(h => h.id === t.running); if (!item?.project) continue;
+    const p = P(item.project), st = loadState(p), active = st.runs.some(r => ['queued', 'running'].includes(r.status));
+    if (active) continue;
+    let status, result;
+    if (st.leaderBoard?.error) { status = 'failed'; result = st.leaderBoard.error; }
+    else if (st.leaderBoard?.finished || (!st.wf?.running && st.wf?.finishedAt)) { status = 'success'; result = '完成'; }
+    else if (st.fixedRecipe && st.components.some(c => c.status === 'failed')) { status = 'failed'; result = st.components.find(c => c.status === 'failed').error || '组件执行失败'; }
+    else if (!isComponents(st) && !st.fixedRecipe && Object.values(st.wf?.nodes || {}).some(n => n.status === 'failed')) { status = 'failed'; result = '工作流节点执行失败'; }
+    else if (!st.wf?.running) { status = 'failed'; result = '工作流已停止'; }
+    else continue; // Human clarification and queued dependencies keep the task busy.
+    const latestNode = Object.values(st.wf?.nodes || {}).filter(n => n.result?.summary).at(-1)?.result?.summary;
+    const lastRun = [...st.runs].reverse().find(r => r.status === 'finished' && r.kind !== 'tick');
+    const summary = st.leaderBoard?.finished?.summary || latestNode || (lastRun && readAgentResult(p, lastRun)?.summary) || '';
+    Object.assign(item, { status, result, endedAt: now(), durationMs: Math.max(0, Date.now() - Date.parse(item.startedAt)), summary: String(summary).split(/\r?\n/).find(Boolean) || '' });
+    t.running = null; t.lastRun = item; changed = true; scheduleEvent(t, 'finished', item);
+  }
+  if (changed) persistSchedules();
+}
+function schedulerCheck({ restart = false } = {}) {
+  const at = schedulerNow(); settleSchedules();
+  for (const t of scheduleData.tasks) {
+    if (!t.enabled) continue;
+    if (!t.nextRun) { t.nextRun = new Date(nextOccurrence(t.schedule, at)).toISOString(); continue; }
+    const due = dueOccurrences(t.schedule, Date.parse(t.nextRun), at); if (!due.count) continue;
+    t.nextRun = new Date(nextOccurrence(t.schedule, at)).toISOString();
+    if (restart) { t.missedCount = (t.missedCount || 0) + due.count; t.lastMissedAt = new Date(due.last).toISOString(); }
+    else runSchedule(t, 'schedule', new Date(due.last).toISOString());
+  }
+  scheduleData.lastCheckAt = new Date(at).toISOString();
+  if (scheduleData.tasks.length || exists(SCHEDULES_FILE)) persistSchedules();
+  return scheduleSnapshot();
+}
+function recoverScheduledRuns() {
+  for (const t of scheduleData.tasks) {
+    if (!t.running) continue;
+    const item = t.history?.find(h => h.id === t.running);
+    if (item) {
+      Object.assign(item, { status: 'interrupted', result: '面板重启，运行中断', endedAt: now(), durationMs: Math.max(0, Date.now() - Date.parse(item.startedAt)) });
+      if (item.project && isDir(item.project)) {
+        const p = P(item.project), st = loadState(p); st.wf ||= { nodes: {} }; st.wf.running = false;
+        for (const r of st.runs) if (['queued', 'running'].includes(r.status)) { r.status = 'failed'; r.error = '面板重启，运行中断'; r.endedAt = now(); }
+        for (const c of st.components) if (['queued', 'running', 'pending', 'waiting'].includes(c.status)) { c.status = 'failed'; c.error = '面板重启，定时工作流中断'; c.endedAt = now(); }
+        for (const n of Object.values(st.wf.nodes || {})) if (n.status === 'running') { n.status = 'failed'; n.note = '面板重启，运行中断'; }
+        st.leaderBoard ||= {}; st.leaderBoard.pending = false; st.leaderBoard.error = '面板重启，定时任务未补跑'; saveState(p, st);
+      }
+    }
+    t.running = null;
+  }
+  schedulerCheck({ restart: true });
+}
+
 // ---------- HTTP ----------
 const body = req => new Promise((ok, bad) => { let b = ''; req.on('data', c => b += c); req.on('end', () => { try { ok(b ? JSON.parse(b) : {}); } catch (e) { bad(e); } }); });
 const send = (res, code, v, type = 'application/json; charset=utf-8') => { res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store' }); res.end(type.startsWith('application/json') ? JSON.stringify(v) : v); };
 const needProject = () => { if (!config.project || !exists(config.project)) throw new Error('先新建或打开一个项目'); return P(config.project); };
 
 const routes = {
+  'POST /api/devtask': input => enqueueDevtask(input),
+  'GET /api/devtask': ({ id }) => publicDevtask(getDevtask(id)),
+  'GET /api/devtask/reply': ({ id }) => { const f = devtaskFiles(getDevtask(id)).last; return { text: exists(f) ? readMd(f) : '' }; },
+  'GET /api/devtasks': () => listDevtasks(),
+  'POST /api/devtask/cancel': ({ id }) => cancelDevtask(id),
+  'GET /api/workflows/saved': () => listSavedWorkflows(),
+  'GET /api/workflows/templates': () => listTemplates(),
+  'POST /api/workflows/saved/save': ({ name, desc, fit }) => {
+    const p = needProject(), st = loadState(p);
+    return storeSavedWorkflow({ name, desc, fit, kind: isComponents(st) || st.fixedRecipe ? 'recipe' : 'template', from: path.basename(p.root), ...(isComponents(st) || st.fixedRecipe ? { recipe: { calls: st.components } } : { graph: readWorkflow(p) }) }, p.root);
+  },
+  'POST /api/workflows/saved/import': ({ workflow }) => storeSavedWorkflow(workflow),
+  'GET /api/workflows/saved/export': ({ id }) => { const w = getSavedWorkflow(id); return { ...normalizeSaved(w), createdAt: w.createdAt }; },
+  'POST /api/workflows/saved/rename': ({ id, name, desc, fit }) => {
+    const old = getSavedWorkflow(id), w = normalizeSaved({ ...old, name, ...(desc !== undefined ? { desc } : {}), ...(fit !== undefined ? { fit } : {}) }); w.createdAt = old.createdAt;
+    writeJson(savedFile(id), w); broadcast('workflow', {}); return { ...w, id };
+  },
+  'POST /api/workflows/saved/delete': ({ id }) => { getSavedWorkflow(id); fs.unlinkSync(savedFile(id)); broadcast('workflow', {}); return { ok: true }; },
+  'POST /api/workflows/saved/apply': ({ id, usage }) => applySavedWorkflow(needProject(), id, usage),
+  'GET /api/schedules': () => { settleSchedules(); return scheduleSnapshot(); },
+  'POST /api/schedules/save': a => saveSchedule(a),
+  'POST /api/schedules/delete': ({ id }) => { const t = getSchedule(id); if (t.running) throw new Error('任务正在执行，请等结束后删除'); scheduleData.tasks = scheduleData.tasks.filter(t => t.id !== id); persistSchedules(); broadcast('schedule', { phase: 'updated', runningCount: scheduleRunningCount() }); return { ok: true }; },
+  'POST /api/schedules/run': ({ id }) => runSchedule(getSchedule(id)),
+  'POST /api/schedules/preview': ({ schedule, after }) => { const base = after === undefined ? schedulerNow() : Date.parse(after); if (!Number.isFinite(base)) throw new Error('预览起始时间不合法'); const s = normalizeSchedule(schedule, base), times = []; let at = base; for (let i = 0; i < 3; i++) { at = nextOccurrence(s, at); times.push(new Date(at).toISOString()); } return { times, timezone: SCHEDULE_ZONE }; },
+  'POST /api/test/scheduler': ({ now: fakeNow, restart = false }) => { if (!SCHEDULER_TEST) throw new Error('测试时钟仅在隔离测试实例启用'); if (fakeNow !== undefined) { const at = Date.parse(fakeNow); if (!Number.isFinite(at)) throw new Error('测试时间不合法'); schedulerClock = at; } return schedulerCheck({ restart: !!restart }); },
+  'GET /api/components': () => componentCatalog(config.project ? P(config.project) : null),
+  'GET /api/components/artifact': ({ path: rel }) => {
+    const p = needProject(), st = loadState(p); if (!isComponents(st) && !st.fixedRecipe) throw new Error('当前不是组件编排或固定配方模式');
+    const root = fs.realpathSync(p.root), f = fs.realpathSync(path.resolve(root, rel || '')), relative = path.relative(root, f);
+    if (!relative || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) throw new Error('路径越界');
+    const mime = ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' })[path.extname(f).toLowerCase()];
+    return mime ? { mime, data: fs.readFileSync(f).toString('base64') } : { text: readMd(f) };
+  },
+  'POST /api/components/call': a => { const p = needProject(); addComponentCall(p, { ...a, id: a.id || `c-${Date.now()}` }); return wfSnapshot(p); },
+  'POST /api/orchestration': ({ orchestration }) => {
+    const p = needProject(), st = loadState(p);
+    if (!['components', 'template'].includes(orchestration)) throw new Error('未知编排模式');
+    if (workflowStarted(p, st) || st.triagePending) throw new Error('工作流已开始，不能切换编排模式');
+    st.orchestration = orchestration; st.wf = { nodes: {}, running: false }; saveState(p, st); broadcast('state', {}); return wfSnapshot(p);
+  },
   // ---- 技能库 ----
   'GET /api/skills': () => scanSkills(config.project && exists(config.project) ? config.project : null).map(({ dir, ...s }) => ({ ...s, path: dir })),
   'GET /api/skills/content': ({ id }) => { const sk = scanSkills(config.project).find(s => s.id === id); if (!sk) throw new Error('找不到这个技能'); return { ...sk, content: readMd(path.join(sk.dir, 'SKILL.md')), files: [...walk(sk.dir)].map(f => path.relative(sk.dir, f).replace(/\\/g, '/')).slice(0, 50) }; },
@@ -2001,6 +2876,7 @@ const routes = {
   'GET /api/timeline': () => storyTimeline(needProject()),
   'POST /api/workflow/save': ({ graph }) => {
     const p = needProject();
+    if (isComponents(loadState(p))) throw new Error('组件实况图由调用记录自动生成');
     if (!graph || !Array.isArray(graph.nodes) || !Array.isArray(graph.edges)) throw new Error('工作流格式不对');
     const ids = new Set(graph.nodes.map(n => n.id));
     if (ids.size !== graph.nodes.length) throw new Error('节点 id 重复');
@@ -2009,6 +2885,7 @@ const routes = {
   },
   'POST /api/workflow/template': ({ file }) => {
     const p = needProject();
+    if (isComponents(loadState(p))) throw new Error('请先切回模板编排');
     if (workflowStarted(p) || loadState(p).triagePending) throw new Error('工作流已开始或正在分诊，不能更换模板');
     const t = readJson(path.join(WF_TEMPLATES, path.basename(file || '')), null);
     if (!t) throw new Error('没有这个模板');
@@ -2022,9 +2899,13 @@ const routes = {
   'POST /api/leader/answer': ({ text }) => {
     const p = needProject(), st = loadState(p), L = st.leaderBoard || {};
     if (!L.ask || L.ask.answered) throw new Error('Leader 现在没有在等回答');
+    if (!String(text || '').trim()) throw new Error('回答不能为空');
     L.answers = [...(L.answers || []), { q: L.ask.q, a: String(text || '').trim(), at: now() }];
-    L.ask.answered = true; st.leaderBoard = L; saveState(p, st);
-    scheduleTick(p, '老板回答了问题'); return snapshot();
+    L.ask.answered = true;
+    if (L.ask.guard === 'limit' && /^(继续|同意|可以|好|是|yes|ok|continue)/i.test(String(text).trim())) st.componentCallLimit = (st.componentCallLimit || 80) + 80;
+    if (L.ask.callId) { const c = st.components.find(x => x.id === L.ask.callId); if (c) { c.status = 'done'; c.endedAt = now(); c.result = { summary: String(text).trim(), artifacts: [] }; } }
+    st.leaderBoard = L; saveState(p, st);
+    advanceComponents(p, st.mode === 'manual'); scheduleTick(p, '老板回答了问题'); return snapshot();
   },
   'POST /api/leader/note': ({ text }) => {
     const p = needProject(), st = loadState(p), L = st.leaderBoard = st.leaderBoard || {};
@@ -2036,13 +2917,16 @@ const routes = {
   'POST /api/mode': ({ mode, maxRounds, acceptLevel: lv }) => { const p = needProject(); if (lv) { const st = loadState(p); if (!ACCEPT_LEVELS[lv]) throw new Error('未知验收档位'); st.acceptLevel = lv; saveState(p, st); } if (mode || maxRounds) setMode(p, mode, maxRounds); broadcast('state', {}); return snapshot(); },
   'POST /api/workflow/stop': () => { const p = needProject(), st = loadState(p); if (st.wf) st.wf.running = false; saveState(p, st); broadcast('state', {}); return wfSnapshot(p); },
   'POST /api/node/run': ({ id, feedback }) => {
-    const p = needProject(), n = readWorkflow(p).nodes.find(x => x.id === id);
+    const p = needProject();
+    if (isComponents(loadState(p))) { const st = loadState(p), c = st.components.find(x => x.id === id); if (!c || c.status !== 'pending') throw new Error('重做请添加一次新的组件调用'); advanceComponents(p, true); return wfSnapshot(p); }
+    const n = readWorkflow(p).nodes.find(x => x.id === id);
     if (!n) throw new Error('节点不存在');
     setNode(p, id, { status: 'idle', note: null });
     startNode(p, n, feedback || null); broadcast('state', {}); return wfSnapshot(p);
   },
   'POST /api/node/approve': async ({ id }) => {
-    const p = needProject(), g = readWorkflow(p), n = g.nodes.find(x => x.id === id);
+    const p = needProject(); if (isComponents(loadState(p))) throw new Error('组件模式不使用节点审批');
+    const g = readWorkflow(p), n = g.nodes.find(x => x.id === id);
     if (!n) throw new Error('节点不存在');
     setNode(p, id, { status: 'done', approvedAt: now(), note: null });
     // 已完成的下游节点标记“上游已更新”
@@ -2053,17 +2937,28 @@ const routes = {
     if ((n.config || {}).preset === 'epics') await refreshSprint(p).catch(e => console.error(e.message));
     advanceWorkflow(p); broadcast('state', {}); return wfSnapshot(p);
   },
-  'POST /api/node/reset': ({ id }) => { const p = needProject(), st = loadState(p); if (st.wf && st.wf.nodes) delete st.wf.nodes[id]; saveState(p, st); broadcast('state', {}); return wfSnapshot(p); },
+  'POST /api/node/reset': ({ id }) => { const p = needProject(), st = loadState(p); if (isComponents(st)) throw new Error('重做请添加一次新的组件调用'); if (st.wf && st.wf.nodes) delete st.wf.nodes[id]; saveState(p, st); broadcast('state', {}); return wfSnapshot(p); },
   'GET /api/state': () => snapshot(),
   'POST /api/project/open': ({ project }) => {
     if (!project || !isDir(project)) throw new Error('目录不存在');
-    if (!exists(path.join(project, '_bmad'))) return { needsSetup: true, path: path.resolve(project) };
+    const p = P(project), st = loadState(p);
+    if (!exists(path.join(project, '_bmad')) && !isComponents(st) && !st.workflowSelection) return { needsSetup: true, path: path.resolve(project) };
     useProject(project); return snapshot();
   },
-  'POST /api/project/create': ({ name, parent, template, requirement, mode }) => {
+  'POST /api/project/create': ({ name, parent, template, requirement, mode, orchestration }) => {
     if (!name) throw new Error('项目名不能为空');
     const dir = path.join(parent || config.projectsRoot, slug(name));
     if (exists(dir) && fs.readdirSync(dir).length) throw new Error(`目录已存在且不为空：${dir}`);
+    if (orchestration !== 'template') {
+      const p = P(dir); fs.mkdirSync(p.panel, { recursive: true });
+      copyTemplate(template === 'generic' ? 'generic' : 'embedded', dir, name, false);
+      const agentFile = path.join(dir, 'AGENTS.md');
+      if (exists(agentFile)) writeMd(agentFile, readMd(agentFile).replace(/（BMAD 工作流）/g, '（组件化编排）').replace(/，BMAD 工作流/g, '，组件化编排').split(/\r?\n/).filter(line => !/BMAD skill|BMAD 脚本|规划文档：|测试命令：由架构文档/.test(line)).join('\n') + '\n\n流程由 Leader 按需求选择组件，不要求先写 PRD、架构或 Story。按实际项目选择测试工具，文档和代码放在项目目录内。\n');
+      const st = loadState(p); st.orchestration = 'components'; st.mode = ['leader', 'auto'].includes(mode) ? mode : 'manual'; st.wf = { nodes: {}, running: automatic(st) }; saveState(p, st);
+      if (String(requirement || '').trim()) writeMd(p.requirement, String(requirement));
+      useProject(dir); ensureLeader(p); scheduleTick(p, '新项目开始'); broadcast('state', {});
+      return { dir, path: dir, status: 'done', orchestration: 'components' };
+    }
     return setupProject(dir, template === 'generic' ? 'generic' : 'embedded', true, { requirement, mode });
   },
   'POST /api/project/setup': ({ path: dir, template }) => { if (!isDir(dir)) throw new Error('目录不存在'); return setupProject(path.resolve(dir), template === 'generic' ? 'generic' : 'embedded', false); },
@@ -2090,6 +2985,7 @@ const routes = {
       if (automatic(st)) st.wf.running = true;
       saveState(p, st); requestTriage(p); advanceWorkflow(p);
     }
+    scheduleTick(p, '需求已更新');
     broadcast('state', {}); return snapshot();
   },
   'POST /api/stage/run': ({ stage, agent, feedback }) => {
@@ -2152,6 +3048,11 @@ const routes = {
   'POST /api/agents/test': ({ id }) => testAgent(id),
   'GET /api/agents/models': ({ id }) => fetchModels(id),
   'GET /api/log': ({ id }) => {
+    const devtask = devtaskData.runs.find(r => r.id === id);
+    if (devtask) {
+      const f = devtaskFiles(devtask), log = exists(f.log) ? fs.readFileSync(f.log, 'utf8') : '';
+      return { log, logBytes: Buffer.byteLength(log, 'utf8'), task: readMd(f.task), result: devtaskMessage(devtask) || null, run: publicDevtask(devtask) };
+    }
     const p = needProject(), r = loadState(p).runs.find(x => x.id === id);
     if (!r) throw new Error('没有这个运行');
     const f = runFiles(p, r);
@@ -2203,10 +3104,15 @@ const server = http.createServer(async (req, res) => {
 });
 server.on('error', e => { console.error(e.code === 'EADDRINUSE' ? `端口 ${PORT} 已被占用（面板可能已经在运行）` : e.message); process.exit(1); });
 server.listen(PORT, '127.0.0.1', () => {
+  recoverDevtasks();
+  recoverScheduledRuns();
+  const schedulerTimer = setInterval(() => { try { schedulerCheck(); } catch (e) { console.error('scheduler:', e.message); } }, 30000); schedulerTimer.unref();
+  const settleTimer = setInterval(() => { try { settleSchedules(); } catch (e) { console.error('schedule completion:', e.message); } }, 1000); settleTimer.unref();
   if (config.project && exists(config.project)) {
     const p = P(config.project), st = loadState(p);
     let dirty = false;
-    for (const r of st.runs) if (['queued', 'running'].includes(r.status)) { r.status = 'failed'; r.error = '面板重启，运行中断'; dirty = true; }
+    for (const r of st.runs) if (['queued', 'running'].includes(r.status)) { r.status = 'failed'; r.error = '面板重启，运行中断'; r.endedAt = now(); dirty = true; }
+    for (const c of st.components) if (['queued', 'running'].includes(c.status)) { c.status = 'failed'; c.error = '面板重启，运行中断；重做请调用新组件'; c.endedAt = now(); dirty = true; }
     if (st.triagePending) {
       const interrupted = st.runs.find(r => r.id === st.triagePending.runId);
       if (interrupted) { interrupted.status = 'failed'; interrupted.error = '面板重启，分诊中断；已使用本地判断'; }

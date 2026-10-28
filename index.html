@@ -87,6 +87,23 @@
   .node:hover { box-shadow: 0 4px 12px rgba(16,24,40,.12); }
   .node.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
   .node.s-running { border-color: var(--accent); } .node.s-waiting { border-color: var(--warn); } .node.s-failed { border-color: var(--bad); } .node.s-done { border-color: color-mix(in srgb, var(--ok) 55%, var(--line)); }
+  .node.component { --tc: var(--accent); min-height: 156px; }
+  .node.component .nb .component-why { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 36px; line-height: 18px; }
+  .node.component.s-running { animation: devStoryGlow 1.8s ease-in-out infinite; }
+  .node.component.fresh { animation: componentIn .36s ease-out both; }
+  .node.component.fresh.s-running { animation: componentIn .36s ease-out both, devStoryGlow 1.8s ease-in-out infinite; }
+  @keyframes componentIn { from { opacity: 0; transform: translateY(8px) scale(.98); } }
+  .component-json { margin: 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--sub); font: 12px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
+  .component-summary { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .component-files { display: grid; gap: 7px; }
+  .component-files button { text-align: left; white-space: normal; overflow-wrap: anywhere; }
+  .component-task { display: grid; gap: 8px; margin-top: 8px; padding: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  .component-task h4 { margin: 0; font-size: 13px; }
+  .component-task p { margin: 0; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+  .component-record { display: grid; gap: 8px; margin-bottom: 10px; }
+  .component-record .row { align-items: flex-start; }
+  .component-empty { padding: 24px; color: var(--muted); text-align: center; }
+  @media (prefers-reduced-motion: reduce) { .node.component.fresh, .node.component.s-running { animation: none; } }
   .node .nh { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; }
   .node .ic { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; color: #fff; font-size: 13px; flex: none; background: var(--tc); }
   .node .tt { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -554,6 +571,59 @@
     .leader-round > summary { gap: 6px; }
   }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+  /* 保存的工作流与定时任务 */
+  .schedule-heading { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .schedule-heading h2 { margin: 0; }
+  .schedule-stats { display: flex; gap: 8px; flex-wrap: wrap; }
+  .schedule-table-wrap { overflow-x: auto; padding: 0; }
+  .schedule-table { width: 100%; border-collapse: collapse; min-width: 850px; }
+  .schedule-table th, .schedule-table td { padding: 15px 16px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  .schedule-table th { font-size: 12px; color: var(--muted); background: var(--sub); font-weight: 600; }
+  .schedule-table tr:last-child td { border-bottom: 0; }
+  .schedule-table .task-name { font-weight: 650; margin-bottom: 3px; }
+  .schedule-table .task-desc { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .schedule-table .row { gap: 10px; flex-wrap: nowrap; }
+  .schedule-switch { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; white-space: nowrap; font-size: 12px; }
+  .form label.schedule-switch { display: inline-flex; align-items: center; gap: 7px; }
+  .schedule-switch input { width: 30px; height: 17px; appearance: none; border: 0; padding: 0; border-radius: 999px; background: var(--line-strong); cursor: pointer; position: relative; }
+  .schedule-switch input::after { content: ''; position: absolute; width: 11px; height: 11px; left: 3px; top: 3px; background: var(--panel); border-radius: 50%; transition: transform .15s; }
+  .schedule-switch input:checked { background: var(--ok); }
+  .schedule-switch input:checked::after { transform: translateX(13px); background: #fff; }
+  .schedule-switch input:focus-visible { outline: 3px solid var(--accent-ring); outline-offset: 2px; }
+  .schedule-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+  .schedule-grid > .full { grid-column: 1 / -1; }
+  .schedule-preview { padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--sub); }
+  .schedule-preview ol { margin: 8px 0 0; padding-left: 22px; font: 12px/1.9 var(--font-mono); color: var(--muted); }
+  .schedule-history { display: grid; gap: 12px; }
+  .schedule-history .card { display: grid; gap: 8px; }
+  .schedule-empty { padding: 48px 24px; text-align: center; display: grid; justify-items: center; gap: 12px; }
+  .schedule-empty svg { width: 38px; height: 38px; color: var(--accent); }
+  .schedule-empty h3, .schedule-empty p { margin: 0; }
+  .saved-list { display: grid; gap: 10px; }
+  .saved-item { display: grid; gap: 8px; }
+  .saved-item p { margin: 0; overflow-wrap: anywhere; }
+  .workflow-choice { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; cursor: pointer; }
+  .workflow-choice:has(input:checked) { border-color: var(--accent); background: var(--accent-weak); }
+  .workflow-choice .row { gap: 8px; }
+  .workflow-choice input { margin: 0; }
+  .schedule-top { font-size: 11px; cursor: pointer; }
+  .schedule-lamp { font: 600 9px/1 var(--font-mono); color: var(--accent); border: 1px solid var(--accent-ring); background: var(--accent-weak); border-radius: 6px; padding: 5px; cursor: pointer; }
+  /* 独立于项目的面板任务 */
+  .devtask-section { min-width: 0; scroll-margin-top: 16px; padding: 0; overflow: hidden; }
+  .devtask-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 18px 20px; border-bottom: 1px solid var(--line); }
+  .devtask-heading h3 { margin: 0; }
+  .devtask-table-wrap { overflow-x: auto; }
+  .devtask-table { width: 100%; min-width: 780px; border-collapse: collapse; }
+  .devtask-table th, .devtask-table td { padding: 13px 20px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .devtask-table th { font-size: 12px; font-weight: 600; color: var(--muted); background: var(--sub); }
+  .devtask-table tr:last-child td { border-bottom: 0; }
+  .devtask-title { font-weight: 650; margin-bottom: 4px; max-width: 340px; overflow-wrap: anywhere; }
+  .devtask-meta { max-width: 300px; overflow-wrap: anywhere; }
+  .devtask-output { max-width: 340px; margin-top: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .devtask-actions { display: flex; gap: 12px; white-space: nowrap; }
+  .devtask-duration { white-space: nowrap; }
+  #devtaskIndicator { white-space: nowrap; }
+  @media (max-width: 700px) { .schedule-grid { grid-template-columns: minmax(0, 1fr); } .schedule-top { max-width: 100px; overflow: hidden; text-overflow: ellipsis; } }
 </style>
 </head>
 <body>
@@ -561,6 +631,8 @@
   <h1><span class="logo"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round"><circle cx="12" cy="5.5" r="2.3" fill="#fff"/><circle cx="5.5" cy="17.5" r="2"/><circle cx="12" cy="18.5" r="2"/><circle cx="18.5" cy="17.5" r="2"/><path d="M12 8v8.3M10.6 7.4L6.6 15.7M13.4 7.4l4 8.3"/></svg></span>Agent 统筹面板<span class="tag">DISPATCH</span></h1>
   <select id="projectSel" title="切换 / 新建 / 打开项目" style="max-width:220px"></select>
   <span class="grow"></span>
+  <button id="devtaskIndicator" class="chip run schedule-top" style="display:none" onclick="showDevtasks()" title="查看全局面板任务"></button>
+  <button id="scheduleIndicator" class="chip run schedule-top" style="display:none" onclick="goPage('schedules')"></button>
   <span id="modeBox" class="row small" title="手动：每步你确认；规则自动：面板按依赖派发、Leader 逐个评审；Leader 统筹：Leader 看全局、自己决定下一步谁做什么"><span class="seg" id="modeSeg"><button data-m="manual">手动</button><button data-m="auto">规则自动</button><button data-m="leader">Leader 统筹</button></span></span>
   <button id="termBtn" title="网页终端：实时查看 agent 的命令行输出"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M7 9.5l3 2.5-3 2.5M12.5 15H17"/></svg>终端<span id="termCount"></span></button>
   <span id="leaderBox" class="row small">Leader <select id="leader"></select><button id="leaderSkills" title="leader 默认带上的技能">🧩 技能</button></span>
@@ -571,6 +643,7 @@
   <button data-p="board"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="5" height="16" rx="1.5"/><rect x="9.5" y="4" width="5" height="11" rx="1.5"/><rect x="15.5" y="4" width="5" height="7" rx="1.5"/></svg></span>看板</button>
   <button data-p="skills"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3.5h6v4a2 2 0 1 1 0 4v4.5H9v-3.2a2 2 0 1 0-4 0V16H3.5V9.5H7a2 2 0 1 0 0-4H3.5"/><path d="M15 11.5h5.5V20H9v-4"/></svg></span>技能库</button>
   <button data-p="runs"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M4 12h16M4 18h12"/><circle cx="18" cy="6" r="2"/></svg></span>运行记录</button>
+  <button data-p="schedules"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M7.5 3v4M16.5 3v4M3.5 10h17M12 13v3l2 1"/></svg></span>定时任务</button>
   <button data-p="settings"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></span>设置</button>
   <div class="crew" id="crew" title="团队指示灯：亮起呼吸 = 正在干活，绿点 = 空闲，灰 = 停用 / 未安装，虚线框 = Leader"></div>
 </nav>
@@ -589,12 +662,13 @@
 <script>
 // ================= 基础 =================
 const COLS = [['backlog', '待办'], ['ready-for-dev', '可开发'], ['in-progress', '进行中'], ['review', '待审核'], ['done', '完成']];
-const KIND = { plan: 'Leader 分配', implement: '执行', review: 'Leader 评审', stage: '阶段', node: '节点', nodereview: 'Leader 自动评审', tick: 'Leader 唤醒', triage: '需求分诊', task: '临时任务' };
-const RUN_ST = { queued: '排队', running: '运行中', finished: '完成', failed: '失败', cancelled: '已取消' };
-const NODE_ST = { idle: ['未运行', ''], running: ['运行中', 'run'], waiting: ['待确认', 'warn'], done: ['完成', 'ok'], failed: ['失败', 'bad'] };
-const TYPES = { start: ['开始', '▶'], agent: ['Agent', '✦'], dev: ['开发看板', '▦'], human: ['人工确认', '✋'], end: ['结束', '■'] };
+const KIND = { component: '组件', plan: 'Leader 分配', implement: '执行', review: 'Leader 评审', stage: '阶段', node: '节点', nodereview: 'Leader 自动评审', tick: 'Leader 唤醒', triage: '需求分诊', task: '临时任务', devtask: '面板任务' };
+const RUN_ST = { queued: '排队', running: '运行中', finished: '完成', failed: '失败', cancelled: '已取消', interrupted: '已中断' };
+const NODE_ST = { idle: ['未运行', ''], pending: ['待依赖', ''], queued: ['排队中', 'run'], running: ['运行中', 'run'], waiting: ['待确认', 'warn'], done: ['完成', 'ok'], failed: ['失败', 'bad'], cancelled: ['已取消', ''] };
+const TYPES = { start: ['开始', '▶'], component: ['组件', '✦'], agent: ['Agent', '✦'], dev: ['开发看板', '▦'], human: ['人工确认', '✋'], end: ['结束', '■'] };
 const PRESETS = { '': '无（自定义指令）', prd: 'BMAD · PRD', architecture: 'BMAD · 架构', epics: 'BMAD · 拆分 Story' };
 let S = null, W = null, SKILLS = null, page = localStorage.getItem('page') || 'workflow', sel = null, selEdge = null, selStory = null;
+let SAVED_WORKFLOWS = [], SCHEDULES = null, scheduleLoadId = 0;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 function isBrokenText(value) {
@@ -627,11 +701,38 @@ async function api(p, body) {
   return j;
 }
 const q = o => '?' + new URLSearchParams(o).toString();
+const devtasks = () => Array.isArray(S?.devtasks) ? S.devtasks : [];
+const allRuns = () => [...new Map([...(S?.runs || []), ...devtasks()].map(r => [r.id, r])).values()];
+const findRun = id => devtasks().find(r => r.id === id) || S?.runs?.find(r => r.id === id);
+const devtaskRunningCount = () => Number(S?.devtaskRunningCount ?? devtasks().filter(r => r.status === 'running').length);
+function renderDevtaskIndicator() {
+  const el = $('devtaskIndicator'); if (!el) return;
+  const count = devtaskRunningCount(); el.style.display = count ? '' : 'none'; el.textContent = count ? `面板任务 ${count}` : '';
+}
+function mergeDevtask(run, runningCount) {
+  if (!S || !run?.id) return;
+  const current = devtasks().find(r => r.id === run.id);
+  if (current) Object.assign(current, run, { kind: 'devtask' });
+  else S.devtasks = [{ ...run, kind: 'devtask' }, ...devtasks()];
+  S.devtaskRunningCount = runningCount !== undefined && Number.isFinite(Number(runningCount)) ? Number(runningCount) : devtasks().filter(r => r.status === 'running').length;
+}
 const TRIAGE_SIZE = { small: '小需求', medium: '中等需求', large: '大需求' };
 const TRIAGE_TEMPLATE = { 'quick-build': '快速实现', 'bmad-standard': 'BMAD 标准流程', 'proposal-pk': '方案比选' };
 const seenLeaderSelections = new Set();
-function triagePending() { return !!(S?.triagePending || W?.triagePending); }
+const componentMode = () => (W?.orchestration || S?.orchestration) === 'components';
+const fixedRecipeMode = () => !!(W?.fixedRecipe || S?.fixedRecipe);
+const componentGraphMode = () => componentMode() || fixedRecipeMode();
+const fixedRecipeHint = '固定配方按保存定义执行。调整流程请在新项目重新应用工作流或模板。';
+function rejectFixedRecipeEdit() { if (!fixedRecipeMode()) return false; toast(fixedRecipeHint); return true; }
+const componentCalls = () => W?.calls || S?.componentCalls || S?.components || [];
+const componentRegistry = () => Array.isArray(W?.components) ? W.components : [];
+const componentInfo = id => componentRegistry().find(c => c.id === id) || { id, name: id };
+const componentCall = n => componentCalls().find(c => c.id === (n?.config?.callId || n?.id));
+const componentElapsed = c => c.startedAt ? c.endedAt ? fmtDur(Date.parse(c.endedAt) - Date.parse(c.startedAt)) : `<span data-since="${esc(c.startedAt)}">${fmtDur(Date.now() - Date.parse(c.startedAt))}</span>` : '尚未开始';
+const componentEstimate = c => c.count ? `历史平均 ${fmtDur(c.avgMs || 0)} · ${c.count} 次` : `预计 ${fmtDur(c.defaultEstimateMs || 120000)} · 暂无历史`;
+function triagePending() { return !componentMode() && !!(S?.triagePending || W?.triagePending); }
 function workflowStarted() {
+  if (componentMode() && componentCalls().length) return true;
   if (typeof W?.workflowStarted === 'boolean') return W.workflowStarted;
   if (typeof S?.workflowStarted === 'boolean') return S.workflowStarted;
   return !!W?.graph?.nodes.some(n => n.type !== 'start' && ['done', 'running', 'waiting'].includes(W.states?.[n.id]?.status));
@@ -641,6 +742,8 @@ function leaderWarning() {
   return S.leaderWarning || W?.leaderWarning || '还没选 Leader，流程不会自动推进';
 }
 function workflowNotices() {
+  if (fixedRecipeMode()) return `<div class="triage-note" role="status">${esc(fixedRecipeHint)}</div>`;
+  if (componentMode()) { const warning = leaderWarning(); return warning ? `<div class="leader-warning" role="alert">${esc(warning)}；请在顶栏选择可用的 Leader。</div>` : ''; }
   const warning = leaderWarning(), t = W?.triage || S?.triage, pending = triagePending(), canApply = !workflowStarted() && !pending;
   let triage = '';
   if (pending) triage = '<div class="triage-note" role="status"><span class="pulse">●</span><span>正在分诊需求，完成后会显示推荐流程…</span></div>';
@@ -692,6 +795,7 @@ function agentOptions(selId, onlyAvail = true) { return S.agents.map(a => `<opti
 // ================= 加载与框架 =================
 async function load() {
   S = await api('/api/state');
+  await loadSavedWorkflows();
   if (S.project) W = await api('/api/workflow').catch(() => null); else W = null;
   renderTop(); renderPage();
 }
@@ -701,8 +805,8 @@ async function refresh() { // 不打断编辑的刷新
   if (S.project) { const w = await api('/api/workflow'); W = { ...w, graph: graphDirty && W && previousProject === S.project ? W.graph : w.graph }; } else W = null;
   renderTop();
   if (previousProject !== S.project) { sel = null; selEdge = null; selStory = null; return renderPage(); }
-  if (page === 'workflow' && W && wfView === 'flow') { loadTimeline().then(() => { renderFlow(); renderWfBar(); }); }
-  else if (page === 'workflow' && W) { drawNodes(); drawEdges(); if (selStory) renderSide(); else renderRunBox(); renderWfBar(); const project = S.project; loadTimeline(true).then(() => { if (S.project !== project || page !== 'workflow' || wfView !== 'canvas') return; drawNodes(); renderWfBar(); if (selStory || (sel && nodeById(sel)?.type === 'dev')) renderSide(); }); }
+  if (page === 'workflow' && W && wfView === 'flow') { if (componentGraphMode()) { renderFlow(); renderWfBar(); } else loadTimeline().then(() => { renderFlow(); renderWfBar(); }); }
+  else if (page === 'workflow' && W) { drawNodes(); drawEdges(); if (selStory || componentGraphMode()) renderSide(); else renderRunBox(); renderWfBar(); const project = S.project; if (!componentGraphMode()) loadTimeline(true).then(() => { if (S.project !== project || page !== 'workflow' || wfView !== 'canvas') return; drawNodes(); renderWfBar(); if (selStory || (sel && nodeById(sel)?.type === 'dev')) renderSide(); }); }
   else if (page === 'leader' && document.activeElement && ['leaderAns', 'leaderNote'].includes(document.activeElement.id)) return; // 正在给 Leader 写字，不打断
   else if (page !== 'settings' && page !== 'skills') renderPage();
 }
@@ -722,6 +826,8 @@ function renderTop() {
   $('leader').title = warning || '选择当前项目的 Leader';
   for (const b of $('nav').children) b.classList.toggle('on', b.dataset.p === page);
   renderCrew();
+  renderScheduleIndicator();
+  renderDevtaskIndicator();
   notifyLeaderSelection();
 }
 const SKILL_ICON = document.querySelector('nav [data-p="skills"] svg').outerHTML;
@@ -730,24 +836,28 @@ const CREW_ABBR = { claude: 'CL', codex: 'CX', gemini: 'GM', grok: 'GK', deepsee
 function renderCrew() {
   const el = $('crew'); if (!el || !S) return;
   el.innerHTML = '<span class="lbl">CREW</span>' + S.agents.map(a => {
-    const runs = (S.runs || []).filter(r => r.agent === a.id && r.status === 'running' && r.kind !== 'tick');
-    const off = !a.available;
+    const runs = allRuns().filter(r => r.agent === a.id && r.status === 'running' && r.kind !== 'tick');
+    const external = devtasks().filter(r => r.agent === a.id && r.status === 'running');
+    const off = !a.available && !runs.length;
     const st = off ? (a.installed ? '已停用' : '未安装') : runs.length ? `干活中 ×${runs.length}` : '空闲';
     const cls = [off ? 'off' : runs.length ? 'busy' : 'idle', S.leader === a.id ? 'leader' : ''].join(' ');
     const tip = `${a.name}${S.leader === a.id ? '（Leader）' : ''}
 模型：${a.effectiveModel || '默认'}
-状态：${st}`;
+状态：${st}${external.map(r => `\n面板任务：${r.title || r.id}`).join('')}`;
     return `<span class="lamp ${cls}" style="--c:var(--${a.id}, var(--accent))" title="${esc(tip)}">${CREW_ABBR[a.id] || esc(a.id.slice(0, 2).toUpperCase())}</span>`;
   }).join('');
+  const count = scheduledRunningCount();
+  if (count) el.innerHTML += `<button class="schedule-lamp pulse" title="${count} 条定时任务运行中" onclick="goPage('schedules')">◷ ${count}</button>`;
 }
 function renderPage() {
   const m = $('main');
+  if (page === 'schedules') return renderSchedules();
+  if (page === 'runs') { m.innerHTML = `<div class="page">${runsView()}</div>`; hydrate(); return; }
   if (!S.project) { m.innerHTML = welcome(); return; }
-  if (!S.bmadInstalled) { m.innerHTML = `<div class="page"><div class="card">这个目录还没装 BMAD。<button class="primary" onclick="setupDialog('${jsq(S.project)}')">安装 BMAD</button></div></div>`; return; }
+  if (!S.bmadInstalled && !componentMode() && !(page === 'workflow' && W?.graph)) { m.innerHTML = `<div class="page"><div class="card">这个目录还没装 BMAD。<button class="primary" onclick="setupDialog('${jsq(S.project)}')">安装 BMAD</button></div></div>`; return; }
   if (page === 'workflow') return renderWorkflow();
   if (page === 'board') m.innerHTML = `<div class="page">${devView()}</div>`;
   if (page === 'leader') m.innerHTML = `<div class="page">${leaderView()}</div>`;
-  if (page === 'runs') m.innerHTML = `<div class="page">${runsView()}</div>`;
   if (page === 'skills') return renderSkills();
   hydrate();
 }
@@ -755,9 +865,108 @@ const enter = () => { const pg = document.querySelector('#main .page'); if (pg) 
 $('nav').onclick = e => { const b = e.target.closest('button'); if (!b) return; if (b.dataset.p === 'settings') return openSettings(); page = b.dataset.p; localStorage.setItem('page', page); renderTop(); renderPage(); enter(); };
 function welcome() {
   return `<div class="welcome">
-    <div class="card" onclick="newProjectDialog()"><h2>从一句需求开始</h2><p class="muted">写下需求并新建项目，自动装好 BMAD（五家工具），再按需求规模推荐工作流。</p></div>
+    <div class="card" onclick="newProjectDialog()"><h2>从一句需求开始</h2><p class="muted">写下需求并新建项目，Leader 自主挑选组件，边做边决定流程深浅。</p></div>
     <div class="card" onclick="openProjectDialog()"><h2>打开已有项目</h2><p class="muted">选一个文件夹。没装 BMAD 的会帮你装上，已有的 PRD / 架构 / epics 会自动识别。</p></div></div>`;
 }
+
+// ================= 保存的工作流 =================
+async function loadSavedWorkflows() {
+  try { const response = await fetch('/api/workflows/saved'); if (!response.ok) throw new Error('加载失败'); const data = await response.json(); SAVED_WORKFLOWS = Array.isArray(data) ? data : data.workflows || []; } catch { SAVED_WORKFLOWS = []; }
+  return SAVED_WORKFLOWS;
+}
+function workflowPicker() {
+  return `<select aria-label="工作流模板" ${workflowStarted() || triagePending() ? 'disabled' : ''} title="选择内置模板或保存的工作流" onchange="chooseWorkflow(this.value);this.value=''"><option value="">模板 / 工作流…</option><optgroup label="内置模板">${(W?.templates || SCHEDULES?.templates || []).map(t => `<option value="template:${esc(t.file)}" title="${esc(t.description || '')}">${esc(t.name)}</option>`).join('')}</optgroup><optgroup label="我保存的">${SAVED_WORKFLOWS.map(t => `<option value="saved:${esc(t.id)}" title="${esc(t.desc || '')}">${esc(t.name)}${t.kind === 'recipe' ? ' · 配方' : ''}</option>`).join('') || '<option disabled>还没有保存的工作流</option>'}</optgroup></select>`;
+}
+function savedWorkflowButtons() { return '<button onclick="saveWorkflowDialog()">保存为工作流</button><button title="重命名、删除、导入或导出保存的工作流" onclick="manageWorkflows()">管理工作流</button>'; }
+window.chooseWorkflow = value => { if (value.startsWith('saved:')) applySavedWorkflowDialog(value.slice(6)); else if (value.startsWith('template:')) applyTemplate(value.slice(9)); };
+window.saveWorkflowDialog = () => {
+  dialog('保存为工作流', `<div class="form"><div class="small muted">${componentMode() ? '保存这次实际调用的组件、深度、执行者、依赖和调用原因，供下一次需求复用。' : '保存当前画布、连线和节点配置，运行状态与结果会自动移除。'}</div><label>名称<input id="swName" maxlength="100" placeholder="例：快速做一个网页" value="${esc(W?.graph?.name && !componentMode() ? W.graph.name : '')}"></label><label>一句话说明<input id="swDesc" maxlength="500" placeholder="这套流程会完成什么"></label><label>适合什么需求（可选）<textarea id="swFit" rows="3" placeholder="例：单页展示、小工具、概念验证"></textarea></label><div class="row"><span class="grow"></span><button class="primary" id="swSubmit" onclick="saveWorkflow(this)">保存工作流</button></div></div>`, true);
+  setTimeout(() => $('swName')?.focus(), 30);
+};
+window.saveWorkflow = async button => {
+  const name = $('swName').value.trim(); if (!name) return toast('填写工作流名称');
+  button.disabled = true;
+  try { await saveGraphNow(); await api('/api/workflows/saved/save', { name, desc: $('swDesc').value.trim(), fit: $('swFit').value.trim() }); await loadSavedWorkflows(); $('dlg').close(); renderWfBar(); toast('工作流已保存，可以在模板下拉框里复用', 'ok'); } finally { if (button.isConnected) button.disabled = false; }
+};
+window.applySavedWorkflowDialog = async id => {
+  const flow = SAVED_WORKFLOWS.find(t => t.id === id); if (!flow) return;
+  dialog(`使用工作流：${flow.name}`, `<div class="form">${flow.desc ? `<p class="muted" style="margin:0">${esc(flow.desc)}</p>` : ''}${flow.fit ? `<div class="small muted">适合：${esc(flow.fit)}</div>` : ''}<label class="workflow-choice"><span class="row"><input type="radio" name="savedUsage" value="reference" checked><b>作为参考</b><span class="chip">默认</span></span><span class="small muted">交给组件编排的 Leader 作为参考配方，Leader 按本次需求调整流程。</span></label><label class="workflow-choice"><span class="row"><input type="radio" name="savedUsage" value="fixed"><b>固定执行</b></span><span class="small muted">切到模板流程，按保存的图运行，适合流程固定的重复工作。</span></label><div class="row"><span class="grow"></span><button class="primary" onclick="applySavedWorkflow('${jsq(id)}',this)">应用工作流</button></div></div>`, true);
+};
+window.applySavedWorkflow = async (id, button) => {
+  if (workflowStarted() || triagePending()) return toast('工作流已开始或正在分诊，暂时不能更换工作流');
+  const usage = document.querySelector('input[name="savedUsage"]:checked')?.value || 'reference'; button.disabled = true;
+  try { await saveGraphNow(); await api('/api/workflows/saved/apply', { id, usage }); $('dlg').close(); sel = null; selEdge = null; selStory = null; graphDirty = false; wfView = 'canvas'; localStorage.setItem('wfView', wfView); await load(); toast(usage === 'reference' ? '已把保存的流程加入 Leader 参考简报' : '已应用固定执行的工作流', 'ok'); } finally { if (button.isConnected) button.disabled = false; }
+};
+window.manageWorkflows = async () => {
+  await loadSavedWorkflows();
+  dialog('我保存的工作流', `<div class="form"><div class="row"><span class="small muted">保存的流程可跨项目复用。</span><span class="grow"></span><button onclick="$('workflowImport').click()">导入 JSON…</button><input type="file" id="workflowImport" accept=".json,application/json" hidden onchange="importWorkflow(this)"></div><div class="saved-list">${SAVED_WORKFLOWS.map(t => `<div class="card saved-item"><div class="row"><b>${esc(t.name)}</b><span class="chip">${t.kind === 'recipe' ? '组件配方' : '流程模板'}</span><span class="grow"></span><span class="small muted">${scheduleDate(t.createdAt)}</span></div><p class="small muted">${esc(t.desc || '暂无说明')}</p>${t.fit ? `<p class="small muted">适合：${esc(t.fit)}</p>` : ''}<div class="row">${S.project ? `<button class="link" ${workflowStarted() || triagePending() ? 'disabled' : ''} onclick="applySavedWorkflowDialog('${jsq(t.id)}')">使用</button>` : ''}<button class="link" onclick="renameWorkflowDialog('${jsq(t.id)}')">重命名 / 编辑</button><a href="/api/workflows/saved/export${esc(q({ id: t.id }))}" download="${esc(t.name)}.json">导出 JSON</a><span class="grow"></span><button class="link bad" onclick="deleteWorkflow('${jsq(t.id)}')">删除</button></div></div>`).join('') || '<div class="component-empty">还没有保存的工作流。打开一个项目，在工作流栏点击“保存为工作流”。</div>'}</div></div>`);
+};
+window.renameWorkflowDialog = id => {
+  const t = SAVED_WORKFLOWS.find(x => x.id === id); if (!t) return;
+  dialog('编辑保存的工作流', `<div class="form"><label>名称<input id="rwName" value="${esc(t.name)}" maxlength="100"></label><label>一句话说明<input id="rwDesc" value="${esc(t.desc || '')}" maxlength="500"></label><label>适合什么需求（可选）<textarea id="rwFit" rows="3">${esc(t.fit || '')}</textarea></label><div class="row"><button onclick="manageWorkflows()">返回</button><span class="grow"></span><button class="primary" onclick="renameWorkflow('${jsq(id)}')">保存修改</button></div></div>`, true);
+};
+window.renameWorkflow = async id => { const name = $('rwName').value.trim(); if (!name) return toast('填写工作流名称'); await api('/api/workflows/saved/rename', { id, name, desc: $('rwDesc').value.trim(), fit: $('rwFit').value.trim() }); await manageWorkflows(); renderWfBar(); toast('工作流已更新', 'ok'); };
+window.deleteWorkflow = async id => { const t = SAVED_WORKFLOWS.find(x => x.id === id); if (!confirm(`删除工作流“${t?.name || id}”？删除后无法恢复。`)) return; await api('/api/workflows/saved/delete', { id }); await manageWorkflows(); renderWfBar(); toast('工作流已删除', 'ok'); };
+window.importWorkflow = async input => {
+  const file = input.files?.[0]; if (!file) return;
+  try { if (file.size > 5 * 1024 * 1024) throw new Error('工作流 JSON 文件不能超过 5 MB'); let workflow; try { workflow = JSON.parse(await file.text()); } catch { throw new Error('文件不是合法的 JSON'); } await api('/api/workflows/saved/import', { workflow }); await manageWorkflows(); renderWfBar(); toast('工作流已导入', 'ok'); } catch (e) { toast(e.message || '导入失败'); } finally { if (input.isConnected) input.value = ''; }
+};
+
+// ================= 定时任务 =================
+const SCHEDULE_ICON = document.querySelector('nav [data-p="schedules"] svg').outerHTML;
+const scheduledRunningCount = () => Number(S?.scheduleRunningCount ?? SCHEDULES?.runningCount ?? 0);
+function renderScheduleIndicator() { const el = $('scheduleIndicator'); if (!el) return; const count = scheduledRunningCount(); el.style.display = count ? '' : 'none'; el.innerHTML = count ? ` 定时任务运行中 ${count}` : ''; }
+function scheduleDate(value) { if (!value) return '—'; const date = new Date(value); return Number.isNaN(date.getTime()) ? esc(value) : esc(date.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })); }
+function scheduleDescription(s = {}) { return s.type === 'daily' ? `每天 ${s.time || '07:30'}` : s.type === 'weekly' ? `每周${['日', '一', '二', '三', '四', '五', '六'][s.weekday ?? 1]} ${s.time || '07:30'}` : s.type === 'interval' ? `每 ${s.hours || 1} 小时` : `Cron · ${s.cron || ''}`; }
+function scheduleResult(h) { const value = h?.result || h?.status; return value === 'running' ? '运行中' : value === 'finished' || value === 'done' || value === 'success' || value === 'completed' ? '完成' : value === 'failed' || value === 'error' ? '失败' : value === 'skipped' ? '跳过：上次未完成' : value === 'missed' ? '错过，未补跑' : typeof value === 'string' ? value : '尚未运行'; }
+function scheduleResultClass(h) { const value = h?.status || h?.result; return ['finished', 'done', 'success', 'completed'].includes(value) ? 'ok' : ['failed', 'error', 'interrupted'].includes(value) ? 'bad' : value === 'running' ? 'run' : ['skipped', 'missed'].includes(value) ? 'warn' : ''; }
+function scheduleLastHistory(task) { const history = [...(task.history || [])].sort((a, b) => Date.parse(b.startedAt || b.at || 0) - Date.parse(a.startedAt || a.at || 0)); return history[0] || (task.lastRun && typeof task.lastRun === 'object' ? task.lastRun : null); }
+function scheduleWorkflowName(workflow = {}) { return workflow.type === 'template' ? (SCHEDULES?.templates || W?.templates || []).find(t => t.file === workflow.file)?.name || workflow.file || '内置模板' : workflow.type === 'saved' ? `${SAVED_WORKFLOWS.find(t => t.id === workflow.id)?.name || '保存的工作流'} · ${workflow.usage === 'fixed' ? '固定执行' : '作为参考'}` : '组件编排'; }
+async function renderSchedules() {
+  const request = ++scheduleLoadId;
+  if (!$('schedulesPage')) $('main').innerHTML = '<div class="page" id="schedulesPage"><div class="card muted">正在加载定时任务…</div></div>';
+  try {
+    const data = await api('/api/schedules'); if (request !== scheduleLoadId || page !== 'schedules') return;
+    SCHEDULES = data; if (Array.isArray(data.savedWorkflows)) SAVED_WORKFLOWS = data.savedWorkflows;
+    if (S) S.scheduleRunningCount = data.runningCount || 0; renderScheduleIndicator(); renderCrew();
+    const tasks = data.tasks || [];
+    $('main').innerHTML = `<div class="page" id="schedulesPage"><div class="schedule-heading"><h2>定时任务</h2><span class="chip">Asia/Shanghai</span><span class="grow"></span><button onclick="manageWorkflows()">管理工作流</button><button class="primary" onclick="scheduleDialog()">＋ 新建定时任务</button></div><div class="schedule-stats"><span class="chip">${tasks.length} 条任务</span><span class="chip ok">${tasks.filter(t => t.enabled).length} 条已启用</span>${data.runningCount ? `<span class="chip run">${data.runningCount} 条运行中</span>` : ''}<span class="small muted">每 30 秒检查 · 关机期间错过的任务不补跑</span></div>${tasks.length ? `<div class="card schedule-table-wrap"><table class="schedule-table"><thead><tr><th>任务 / 需求</th><th>运行计划</th><th>下次运行</th><th>上次结果</th><th>启用</th><th>操作</th></tr></thead><tbody>${tasks.map(task => { const last = scheduleLastHistory(task); return `<tr><td><div class="task-name">${esc(task.name)}</div><div class="small muted task-desc" title="${esc(task.input)}">${esc(task.input)}</div><div class="small muted">${task.target?.type === 'existing' ? '固定项目' : '每次新建项目'} · ${esc(scheduleWorkflowName(task.workflow))}</div></td><td><div>${esc(scheduleDescription(task.schedule))}</div>${task.missedCount ? `<div class="small" style="color:var(--warn)" title="最近错过：${scheduleDate(task.lastMissedAt)}">错过 ${Number(task.missedCount)} 次 · 未补跑</div>` : ''}</td><td><span class="small">${task.enabled ? scheduleDate(task.nextRun) : '已停用'}</span></td><td><span class="chip ${scheduleResultClass(last)}">${esc(scheduleResult(last))}</span>${last ? `<div class="small muted" style="margin-top:4px">${scheduleDate(last.startedAt || last.at)}</div>` : ''}</td><td><label class="schedule-switch"><input type="checkbox" ${task.enabled ? 'checked' : ''} aria-label="启用 ${esc(task.name)}" onchange="toggleSchedule('${jsq(task.id)}',this)"><span>${task.enabled ? '开' : '关'}</span></label></td><td><div class="row"><button class="link" onclick="scheduleDialog('${jsq(task.id)}')">编辑</button><button class="link" onclick="runSchedule('${jsq(task.id)}',this)">立即运行</button><button class="link" onclick="scheduleHistory('${jsq(task.id)}')">历史</button></div></td></tr>`; }).join('')}</tbody></table></div>` : `<div class="card schedule-empty">${SCHEDULE_ICON}<h3>让需求按时开始</h3><p class="muted">每天、每周、间隔数小时，或用 Cron 安排固定工作。</p><p class="small muted">可继续已有项目，也可以每次创建一个新项目。</p><button class="primary" onclick="scheduleDialog()">创建第一条定时任务</button></div>`}<div class="small muted">任务在面板进程运行期间执行；同一任务上一次未完成时，本次会记为跳过。历史里可查看项目和 Leader 的交付摘要。</div></div>`;
+  } catch (e) { if (page === 'schedules' && request === scheduleLoadId) $('main').innerHTML = `<div class="page"><div class="card">${esc(e.message || '加载失败')} <button onclick="renderSchedules()">重试</button></div></div>`; }
+}
+function scheduleWorkflowOptions(value = 'components') { return `<option value="components" ${value === 'components' ? 'selected' : ''}>组件编排（默认）</option><optgroup label="内置模板">${(SCHEDULES?.templates || W?.templates || []).map(t => `<option value="template:${esc(t.file)}" ${value === 'template:' + t.file ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</optgroup><optgroup label="我保存的">${SAVED_WORKFLOWS.map(t => `<option value="saved:${esc(t.id)}" ${value === 'saved:' + t.id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</optgroup>`; }
+let scheduleEditorOriginal = null;
+window.scheduleDialog = (id = '') => {
+  const task = SCHEDULES?.tasks?.find(t => t.id === id), schedule = task?.schedule || { type: 'daily', time: '07:30', hours: 24, weekday: 1 }, workflow = task?.workflow || { type: 'components' };
+  scheduleEditorOriginal = task?.schedule || null;
+  const workflowValue = workflow.type === 'components' ? 'components' : workflow.type === 'saved' ? `saved:${workflow.id}` : `template:${workflow.file}`;
+  const recent = [...new Set([...(SCHEDULES?.recent || S?.recent || []), S?.project].filter(Boolean))];
+  dialog(task ? '编辑定时任务' : '新建定时任务', `<div class="form" id="scheduleEditor"><div class="schedule-grid"><label>任务名称<input id="scName" value="${esc(task?.name || '')}" maxlength="100" placeholder="例：每日站点检查"></label><label>运行计划<select id="scType" onchange="syncScheduleEditor();queueSchedulePreview()"><option value="daily" ${schedule.type === 'daily' ? 'selected' : ''}>每天</option><option value="weekly" ${schedule.type === 'weekly' ? 'selected' : ''}>每周</option><option value="interval" ${schedule.type === 'interval' ? 'selected' : ''}>每 N 小时</option><option value="cron" ${schedule.type === 'cron' ? 'selected' : ''}>自定义 Cron</option></select></label><div class="full row" id="scTiming"><label id="scWeekField">星期<select id="scWeekday" onchange="queueSchedulePreview()">${['日', '一', '二', '三', '四', '五', '六'].map((d, i) => `<option value="${i}" ${Number(schedule.weekday ?? 1) === i ? 'selected' : ''}>星期${d}</option>`).join('')}</select></label><label id="scTimeField">时间<input id="scTime" type="time" value="${esc(schedule.time || '07:30')}" onchange="queueSchedulePreview()"></label><label id="scHoursField">间隔小时数<input id="scHours" type="number" min="0.01" step="0.01" value="${esc(schedule.hours || 24)}" oninput="queueSchedulePreview()"></label><label id="scCronField" class="grow">Cron 表达式（分 时 日 月 周）<input id="scCron" placeholder="30 7 * * *" value="${esc(schedule.cron || '')}" oninput="queueSchedulePreview()"></label><span class="small muted">Asia/Shanghai</span></div><label>执行目标<select id="scTarget" onchange="syncScheduleEditor()"><option value="new" ${task?.target?.type !== 'existing' ? 'selected' : ''}>每次新建项目</option><option value="existing" ${task?.target?.type === 'existing' ? 'selected' : ''}>固定项目，追加一轮需求</option></select></label><label>使用工作流<select id="scWorkflow" onchange="syncScheduleEditor()">${scheduleWorkflowOptions(workflowValue)}</select></label><label id="scProjectField" class="full">固定项目路径<input id="scProject" list="scRecentProjects" placeholder="选择或填写项目路径" value="${esc(task?.target?.project || S?.project || '')}"><datalist id="scRecentProjects">${recent.map(p => `<option value="${esc(p)}">${esc(p.split(/[\\/]/).pop())}</option>`).join('')}</datalist></label><label id="scUsageField" class="full">保存的工作流用法<select id="scUsage"><option value="reference" ${workflow.usage !== 'fixed' ? 'selected' : ''}>作为参考（Leader 按需求调整，默认）</option><option value="fixed" ${workflow.usage === 'fixed' ? 'selected' : ''}>固定执行（按保存的图运行）</option></select></label><div class="full small muted" id="scNewHint">新项目放在项目根目录，名称为“任务名-YYYYMMDD-HHmm”。</div><label class="full">需求 / 指令<textarea id="scInput" rows="4" placeholder="Leader 每次运行时收到的需求，例如：检查网页内容并更新今天的时间">${esc(task?.input || '')}</textarea></label><div class="full schedule-preview"><div class="row"><b class="small">接下来 3 次运行时间</b><span class="grow"></span><button class="link small" onclick="previewSchedule()">刷新预览</button></div><div id="scPreview" class="small muted" style="margin-top:6px">计算中…</div></div></div><div class="row"><label class="schedule-switch"><input id="scEnabled" type="checkbox" ${task?.enabled !== false ? 'checked' : ''}><span>启用任务</span></label><span class="grow"></span>${task ? `<button class="bad" onclick="deleteSchedule('${jsq(id)}')">删除任务</button>` : ''}<button class="primary" id="scSave" onclick="saveSchedule('${jsq(id)}',this)">保存任务</button></div></div>`, false);
+  syncScheduleEditor(); previewSchedule(); setTimeout(() => $('scName')?.focus(), 30);
+};
+window.syncScheduleEditor = () => { if (!$('scType')) return; const type = $('scType').value; $('scTimeField').style.display = ['daily', 'weekly'].includes(type) ? '' : 'none'; $('scWeekField').style.display = type === 'weekly' ? '' : 'none'; $('scHoursField').style.display = type === 'interval' ? '' : 'none'; $('scCronField').style.display = type === 'cron' ? '' : 'none'; $('scProjectField').style.display = $('scTarget').value === 'existing' ? '' : 'none'; $('scNewHint').style.display = $('scTarget').value === 'new' ? '' : 'none'; $('scUsageField').style.display = $('scWorkflow').value.startsWith('saved:') ? '' : 'none'; };
+function readSchedule() { const type = $('scType').value; return type === 'daily' ? { type, time: $('scTime').value } : type === 'weekly' ? { type, time: $('scTime').value, weekday: Number($('scWeekday').value) } : type === 'interval' ? { type, hours: Number($('scHours').value), ...(scheduleEditorOriginal?.type === 'interval' && Number($('scHours').value) === scheduleEditorOriginal.hours && scheduleEditorOriginal.anchorAt ? { anchorAt: scheduleEditorOriginal.anchorAt } : {}) } : { type, cron: $('scCron').value.trim() }; }
+let schedulePreviewTimer = null, schedulePreviewRequest = 0;
+window.queueSchedulePreview = () => { clearTimeout(schedulePreviewTimer); schedulePreviewTimer = setTimeout(previewSchedule, 400); };
+window.previewSchedule = async () => {
+  if (!$('scPreview')) return; const request = ++schedulePreviewRequest, destination = $('scPreview');
+  try { const response = await fetch('/api/schedules/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ schedule: readSchedule() }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || '运行计划无效'); if (request !== schedulePreviewRequest || destination !== $('scPreview')) return; const times = data.times || data.nextRuns || []; destination.innerHTML = `<ol>${times.slice(0, 3).map(t => `<li>${scheduleDate(t)}</li>`).join('')}</ol>`; } catch (e) { if (request === schedulePreviewRequest && destination === $('scPreview')) destination.textContent = e.message || '无法计算运行时间'; }
+};
+window.saveSchedule = async (id, button) => {
+  const name = $('scName').value.trim(), input = $('scInput').value.trim(), targetType = $('scTarget').value, project = $('scProject').value.trim();
+  if (!name || !input) return toast('填写任务名称和需求 / 指令'); if (targetType === 'existing' && !project) return toast('选择固定项目');
+  const selected = $('scWorkflow').value, workflow = selected.startsWith('saved:') ? { type: 'saved', id: selected.slice(6), usage: $('scUsage').value } : selected.startsWith('template:') ? { type: 'template', file: selected.slice(9) } : { type: 'components' };
+  button.disabled = true;
+  try { await api('/api/schedules/save', { ...(id ? { id } : {}), name, enabled: $('scEnabled').checked, schedule: readSchedule(), target: { type: targetType, ...(targetType === 'existing' ? { project } : {}) }, input, workflow }); $('dlg').close(); await renderSchedules(); toast('定时任务已保存', 'ok'); } finally { if (button.isConnected) button.disabled = false; }
+};
+window.toggleSchedule = async (id, checkbox) => { const task = SCHEDULES?.tasks?.find(t => t.id === id); if (!task) return; checkbox.disabled = true; try { await api('/api/schedules/save', { ...task, enabled: checkbox.checked }); await renderSchedules(); } catch { checkbox.checked = !checkbox.checked; } finally { if (checkbox.isConnected) checkbox.disabled = false; } };
+window.deleteSchedule = async id => { const task = SCHEDULES?.tasks?.find(t => t.id === id); if (!confirm(`删除定时任务“${task?.name || id}”？历史记录也会删除。`)) return; await api('/api/schedules/delete', { id }); $('dlg').close(); await renderSchedules(); toast('定时任务已删除', 'ok'); };
+window.runSchedule = async (id, button) => { button.disabled = true; try { await api('/api/schedules/run', { id }); await renderSchedules(); toast('已提交定时任务，运行结果会记入历史', 'ok'); } finally { if (button.isConnected) button.disabled = false; } };
+window.scheduleHistory = id => {
+  const task = SCHEDULES?.tasks?.find(t => t.id === id); if (!task) return;
+  const history = [...(task.history || [])].sort((a, b) => Date.parse(b.startedAt || b.at || 0) - Date.parse(a.startedAt || a.at || 0));
+  dialog(`运行历史：${task.name}`, `<div class="schedule-history">${history.map(h => { const elapsed = h.durationMs ?? (h.endedAt && h.startedAt ? Date.parse(h.endedAt) - Date.parse(h.startedAt) : null), summary = String(h.summary || h.leaderSummary || h.error || h.reason || '').split(/\r?\n/)[0]; return `<div class="card"><div class="row"><b class="small">${scheduleDate(h.startedAt || h.at)}</b><span class="chip ${scheduleResultClass(h)}">${esc(scheduleResult(h))}</span><span class="grow"></span><span class="small muted">${elapsed !== null ? fmtDur(elapsed) : h.startedAt && !h.endedAt && (h.status === 'running' || h.result === 'running') ? `<span data-since="${esc(h.startedAt)}">${fmtDur(Date.now() - Date.parse(h.startedAt))}</span>` : '—'}</span></div>${summary ? `<div class="small component-summary">${resultCopy(summary, true)}</div>` : ''}${h.project ? `<button class="link" style="justify-self:start" onclick="openScheduledProject('${jsq(h.project)}')">打开项目 · ${esc(h.project.split(/[\\/]/).pop())} ↗</button>` : ''}</div>`; }).join('') || '<div class="component-empty">还没有运行记录。任务开始、完成或跳过后会显示在这里。</div>'}</div>`);
+};
+window.openScheduledProject = async project => { const result = await api('/api/project/open', { project }); if (result.needsSetup) return setupDialog(result.path); $('dlg').close(); sel = null; selStory = null; selEdge = null; SKILLS = null; page = 'workflow'; localStorage.setItem('page', page); await load(); };
 
 // ================= 工作流画布 =================
 let view = { x: 40, y: 40, k: 1 }, graphDirty = false, saveTimer = null, drag = null;
@@ -779,17 +988,17 @@ const tlList = () => Array.isArray(TL) ? TL : [];
 const tlReworks = () => tlList().reduce((a, s) => a + (s.reworks || 0), 0);
 window.setWfView = v => { wfView = v; localStorage.setItem('wfView', v); renderWorkflow(); };
 const nodeById = id => W.graph.nodes.find(n => n.id === id);
-const nst = id => (W.states && W.states[id]) || { status: 'idle' };
+const nst = id => componentGraphMode() && componentCall(nodeById(id)) ? { ...componentCall(nodeById(id)), ...(W.states?.[id] || {}) } : (W.states && W.states[id]) || { status: 'idle' };
 function renderWorkflow() {
   if (devProject !== S.project) { devProject = S.project; selStory = null; sel = null; selEdge = null; }
   if (wfView === 'flow') {
     $('main').innerHTML = `<div class="wf"><div class="wf-bar" id="wfBar"></div><div class="flow" id="flow"><div class="muted small">加载 Story 流程…</div></div></div>`;
     renderWfBar();
-    loadTimeline(true).then(() => { renderFlow(); renderWfBar(); });
+    if (componentGraphMode()) renderFlow(); else loadTimeline(true).then(() => { renderFlow(); renderWfBar(); });
     return;
   }
   const project = S.project;
-  loadTimeline().then(() => { if (S.project !== project || page !== 'workflow' || wfView !== 'canvas') return; drawNodes(); renderWfBar(); if (selStory || (sel && nodeById(sel)?.type === 'dev')) renderSide(); });
+  if (!componentGraphMode()) loadTimeline().then(() => { if (S.project !== project || page !== 'workflow' || wfView !== 'canvas') return; drawNodes(); renderWfBar(); if (selStory || (sel && nodeById(sel)?.type === 'dev')) renderSide(); });
   let saved = null; try { saved = JSON.parse(localStorage.getItem('view:' + S.project)); } catch {}
   if (saved) view = saved; else setTimeout(() => fitView(), 30);
   $('main').innerHTML = `<div class="wf">
@@ -801,21 +1010,30 @@ function renderWorkflow() {
 }
 function renderWfBar() {
   if (!$('wfBar')) return;
+  if (componentMode()) return renderComponentBar();
   const total = W.graph.nodes.length, done = W.graph.nodes.filter(n => nst(n.id).status === 'done').length;
   const waiting = W.graph.nodes.filter(n => nst(n.id).status === 'waiting').length;
   const rw = tlReworks();
-  const seg = `<span class="seg"><button class="${wfView === 'canvas' ? 'on' : ''}" onclick="setWfView('canvas')">画布</button><button class="${wfView === 'flow' ? 'on' : ''}" onclick="setWfView('flow')" title="每个 Story 的实现、验收、打回、返工过程">Story 流程${rw ? `<span class="badge-r">↺${rw}</span>` : ''}</button></span>`;
+  const seg = `<span class="seg"><button class="${wfView === 'canvas' ? 'on' : ''}" onclick="setWfView('canvas')">画布</button><button class="${wfView === 'flow' ? 'on' : ''}" onclick="setWfView('flow')" title="${fixedRecipeMode() ? '固定配方的组件调用与执行结果' : '每个 Story 的实现、验收、打回、返工过程'}">${fixedRecipeMode() ? '调用时间线' : 'Story 流程'}${rw && !fixedRecipeMode() ? `<span class="badge-r">↺${rw}</span>` : ''}</button></span>`;
   $('wfBar').innerHTML = `<div class="wf-tools">${seg}<b>${esc(W.graph.name || '工作流')}</b><span class="chip ${W.running || triagePending() ? 'run' : ''}">${triagePending() ? '<span class="pulse">● 分诊中</span>' : W.running ? '<span class="pulse">● 运行中</span>' : total && done === total ? '已完成' : '未运行'}</span>
     <span class="small muted">${done}/${total} 完成${waiting ? ` · <b style="color:var(--warn)">${waiting} 个待你确认</b>` : ''}</span>${S.mode === 'leader' ? '<span class="chip run">🧠 Leader 统筹</span>' : S.mode === 'auto' ? `<span class="chip run" title="按依赖派发、Leader 逐个评审">🤖 规则自动 · 最多打回 ${S.maxRounds} 轮</span>` : '<span class="chip">✋ 手动模式</span>'}<span class="grow"></span>
-    ${wfView === 'flow' ? '' : `<button onclick="addNodeMenu(event)">＋ 添加节点</button>
-    <select ${workflowStarted() || triagePending() ? 'disabled' : ''} title="${workflowStarted() ? '工作流开始后不能更换模板' : triagePending() ? '等待需求分诊完成' : '选择工作流模板'}" onchange="applyTemplate(this.value); this.value=''"><option value="">模板…</option>${W.templates.map(t => `<option value="${esc(t.file)}" title="${esc(t.description)}">${esc(t.name)}</option>`).join('')}</select>`}
+    ${fixedRecipeMode() ? '<span class="chip">模板固定执行</span>' : ''}${orchestrationSwitch()}${wfView === 'flow' ? '' : `${fixedRecipeMode() ? '' : '<button onclick="addNodeMenu(event)">＋ 添加节点</button>'}
+    ${workflowPicker()}`}
+    ${savedWorkflowButtons()}
     ${W.running ? '<button onclick="api(\'/api/workflow/stop\',{}).then(refresh)">停止</button>' : `<button class="primary" ${triagePending() ? 'disabled' : ''} onclick="runWorkflow()">▶ 运行</button>`}</div><div class="wf-notices">${workflowNotices()}</div>`;
   syncWfBarHeight();
 }
 function syncWfBarHeight() { const bar = $('wfBar'); if (bar) bar.parentElement.style.setProperty('--wf-bar-height', `${bar.offsetHeight}px`); }
+function orchestrationSwitch() { return `<select aria-label="编排模式" ${workflowStarted() || triagePending() ? 'disabled' : ''} title="${workflowStarted() ? '工作流开始后不能切换编排模式' : '选择组件自主编排或模板流程'}" onchange="setOrchestration(this.value)"><option value="components" ${componentMode() ? 'selected' : ''}>组件自主编排</option><option value="template" ${componentMode() ? '' : 'selected'}>模板流程</option></select>`; }
+window.setOrchestration = async orchestration => { if (workflowStarted() || triagePending()) return; await saveGraphNow(); await api('/api/orchestration', { orchestration }); sel = null; selEdge = null; selStory = null; graphDirty = false; wfView = 'canvas'; localStorage.setItem('wfView', wfView); await load(); toast(orchestration === 'components' ? '已切到组件自主编排' : '已切到模板流程', 'ok'); };
+function renderComponentBar() {
+  const calls = componentCalls(), done = calls.filter(c => c.status === 'done').length, active = calls.filter(c => ['running', 'queued'].includes(c.status)).length, finished = !!S.leaderBoard?.finished || calls.some(c => c.component === 'deliver' && c.status === 'done');
+  $('wfBar').innerHTML = `<div class="wf-tools"><span class="seg"><button class="${wfView === 'canvas' ? 'on' : ''}" onclick="setWfView('canvas')">画布</button><button class="${wfView === 'flow' ? 'on' : ''}" onclick="setWfView('flow')">调用时间线</button></span><b>组件实况图</b><span class="chip ${finished ? 'ok' : W.running ? 'run' : ''}">${finished ? '已交付' : W.running ? '<span class="pulse">● 运行中</span>' : '未运行'}</span><span class="small muted">${done}/${calls.length} 个组件完成${active ? ` · ${active} 个执行中` : ''}</span><span class="grow"></span>${orchestrationSwitch()}${workflowPicker()}${savedWorkflowButtons()}${S.mode === 'manual' ? '<button onclick="addNodeMenu(event)">＋ 添加组件</button>' : ''}${W.running ? '<button onclick="api(\'/api/workflow/stop\',{}).then(refresh)">停止</button>' : '<button class="primary" onclick="runWorkflow()">▶ 运行</button>'}</div><div class="wf-notices">${workflowNotices()}</div>`;
+  syncWfBarHeight();
+}
 window.addEventListener('resize', syncWfBarHeight);
 window.runWorkflow = async () => { await saveGraphNow(); await api('/api/workflow/run', {}); refresh(); };
-window.applyTemplate = async file => { if (!file) return; if (workflowStarted() || triagePending()) return toast('工作流已开始或正在分诊，暂时不能更换模板'); if (!confirm('用模板替换当前工作流？已完成的产出文档不会删除。')) return; W = { ...W, ...(await api('/api/workflow/template', { file })) }; sel = null; renderWorkflow(); };
+window.applyTemplate = async file => { if (!file) return; if (workflowStarted() || triagePending()) return toast('工作流已开始或正在分诊，暂时不能更换模板'); if (!confirm('用模板替换当前工作流？已完成的产出文档不会删除。')) return; await saveGraphNow(); if (componentMode()) await api('/api/orchestration', { orchestration: 'template' }); await api('/api/workflow/template', { file }); sel = null; selEdge = null; selStory = null; await load(); };
 window.applyTriage = async template => {
   if (workflowStarted() || triagePending()) return toast('工作流已开始或正在分诊，暂时不能更换模板');
   await saveGraphNow();
@@ -870,6 +1088,7 @@ function laneTrack(s) {
 }
 function renderFlow() {
   const box = $('flow'); if (!box) return;
+  if (componentGraphMode()) return renderComponentFlow(box);
   if (TL === 'unavailable') { box.innerHTML = '<div class="card">Story 流程需要面板加载新接口，面板重启后可用（重启会在没有执行中任务时自动进行）。</div>'; return; }
   const list = tlList(); if (!list.length) { box.innerHTML = '<div class="card">还没有 Story。拆分 Story 节点通过后这里会出现每个 Story 的流程。</div>'; return; }
   const shown = tlOnlyRework ? list.filter(s => s.reworks) : list;
@@ -1003,8 +1222,42 @@ window.toggleDevLanes = id => {
 };
 window.selectDevStory = key => { selStory = key; sel = null; selEdge = null; drawNodes(); drawEdges(); renderSide(); };
 window.closeDevStory = () => { selStory = null; drawNodes(); renderSide(); };
+// 组件图由调用依赖决定位置，不写回模板工作流，也不提供手动改线。
+const COMPONENT_SEEN = new Map();
+function layoutComponents() {
+  const nodes = W.graph.nodes, byId = new Map(nodes.map(n => [n.id, n])), levels = new Map(), visiting = new Set();
+  const level = id => { if (levels.has(id)) return levels.get(id); if (visiting.has(id)) return 1; visiting.add(id); const parents = (W.graph.edges || []).filter(e => e.to === id && byId.has(e.from)); const l = parents.length ? Math.max(...parents.map(e => level(e.from))) + 1 : byId.get(id)?.type === 'start' ? 0 : 1; visiting.delete(id); levels.set(id, l); return l; };
+  nodes.forEach(n => level(n.id));
+  const groups = new Map(); for (const n of nodes) { const l = levels.get(n.id); if (!groups.has(l)) groups.set(l, []); groups.get(l).push(n); }
+  const tallest = Math.max(1, ...Array.from(groups.values(), g => g.length));
+  for (const [l, group] of groups) group.forEach((n, i) => { n.x = 40 + l * 330; n.y = 45 + (tallest - group.length) * 105 + i * 210; });
+}
+function componentRun(c) { return (S.runs || []).find(r => r.id === c.runId) || (S.runs || []).find(r => r.callId === c.id || r.nodeId === c.id); }
+function componentWho(c) { const info = componentInfo(c.component); return info.executor === 'human' ? '老板' : info.executor === 'panel' ? '面板' : c.component === 'compare' && c.inputs?.agents?.length ? c.inputs.agents.map(agentName).join(' + ') : agentName(c.agent || S.leader); }
+function componentModel(c) { if (['human', 'panel'].includes(componentInfo(c.component).executor)) return ''; if (c.component === 'compare') return [...new Set((c.runs?.length ? c.runs.map(r => r.model) : (c.inputs?.agents || []).map(id => S.agents.find(a => a.id === id)?.effectiveModel)).filter(Boolean))].join(' / '); return c.model || componentRun(c)?.model || S.agents.find(a => a.id === (c.agent || S.leader))?.effectiveModel || ''; }
+function componentJson(value) { return `<pre class="component-json">${esc(JSON.stringify(displayResult(value), null, 2))}</pre>`; }
+function componentArtifacts(result) { return (result?.artifacts || []).map(a => typeof a === 'string' ? a : a.path || a.file || '').filter(Boolean); }
+function drawComponentNodes(box) {
+  layoutComponents(); const now = Date.now();
+  box.innerHTML = W.graph.nodes.map(n => {
+    const call = componentCall(n), s = nst(n.id), [label, cls] = NODE_ST[s.status] || [s.status, ''], key = S.project + '|' + n.id;
+    if (!COMPONENT_SEEN.has(key)) COMPONENT_SEEN.set(key, now);
+    const age = now - COMPONENT_SEEN.get(key), fresh = n.type === 'component' && age < 360;
+    let body = n.type === 'start' ? `<div class="component-why">${resultCopy(W.requirement || '点开填写需求')}</div>` : n.type === 'end' ? '<div class="ln">交付完成</div>' : '';
+    if (call) body = `<div class="component-why" title="${esc(resultText(call.why || ''))}">${resultCopy(call.why || '按需求执行')}</div><div class="ln" style="color:${color(call.agent || S.leader)}">${esc(componentWho(call))}${call.depth ? ` · ${esc(call.depth)}` : ''}</div><div class="ln" title="${esc(componentModel(call))}">${esc(componentModel(call) || (componentInfo(call.component).executor === 'agent' ? '默认模型' : ''))}</div><div class="ln">${componentElapsed(call)}${call.status === 'pending' && call.depends_on?.length ? ` · 等待 ${call.depends_on.length} 个依赖` : ''}</div>${call.error ? `<div class="ln" style="color:var(--bad)" title="${esc(resultText(call.error))}">${resultCopy(call.error)}</div>` : ''}`;
+    return `<div class="node component s-${esc(s.status)} ${sel === n.id ? 'sel' : ''} ${fresh ? 'fresh' : ''}" data-id="${esc(n.id)}" style="left:${n.x}px;top:${n.y}px;animation-delay:${-age}ms,0ms;--tc:var(--t-${n.type},var(--accent))">${n.type !== 'start' ? '<span class="h in"></span>' : ''}${n.type !== 'end' ? '<span class="h out"></span>' : ''}<div class="nh"><span class="ic">${TYPES[n.type]?.[1] || '✦'}</span><span class="tt" title="${esc(n.title || call?.name || '')}">${esc(n.title || call?.name || componentInfo(call?.component).name || '组件')}</span><span class="chip ${cls}">${s.status === 'running' ? '<span class="pulse">' + esc(label) + '</span>' : esc(label)}</span></div><div class="nb">${body}</div></div>`;
+  }).join('');
+  tick();
+}
+function renderComponentFlow(box) {
+  const scroll = box.scrollTop, calls = componentCalls();
+  box.innerHTML = `<div class="flow-head"><b>组件调用时间线</b><span class="muted small">${calls.length} 个调用 · 按创建顺序</span><span class="grow"></span><button onclick="goPage('board')">任务看板</button></div>${calls.map(c => { const [st, cls] = NODE_ST[c.status] || [c.status, ''], run = componentRun(c); return `<div class="card component-record"><div class="row"><button class="link" onclick="selectComponent('${jsq(c.id)}')"><b>${esc(c.name || componentInfo(c.component).name)}</b></button><span class="chip ${cls}">${esc(st)}</span><span class="small muted">${esc(c.id)} · ${esc(componentWho(c))}${componentModel(c) ? ' · ' + esc(componentModel(c)) : ''}</span><span class="grow"></span><span class="small muted">${componentElapsed(c)}</span>${run ? `<button class="link" onclick="openTerm('${jsq(run.id)}')">执行终端</button>` : ''}</div><div class="small component-summary">${resultCopy(c.why || '')}</div>${c.result?.summary ? `<div class="small component-summary">${resultCopy(c.result.summary)}</div>` : ''}${c.error ? `<div class="small" style="color:var(--bad)">${resultCopy(c.error)}</div>` : ''}</div>`; }).join('') || '<div class="card component-empty">Leader 调用组件后，这里会显示每一步的原因和结果。</div>'}`;
+  box.scrollTop = scroll; tick();
+}
+window.selectComponent = id => { const n = W.graph.nodes.find(n => (n.config?.callId || n.id) === id); sel = n?.id || null; selStory = null; selEdge = null; page = 'workflow'; wfView = 'canvas'; localStorage.setItem('page', page); localStorage.setItem('wfView', wfView); renderTop(); renderWorkflow(); if (n) { const cv = $('canvas'); view.x = Math.min(100, cv.clientWidth / 2 - 300) - n.x * view.k; view.y = cv.clientHeight / 2 - (n.y + 80) * view.k; applyView(); } };
 function drawNodes() {
   const box = $('nodes'); if (!box) return;
+  if (componentGraphMode()) return drawComponentNodes(box);
   box.innerHTML = W.graph.nodes.map(n => {
     const s = nst(n.id), [stl, stc] = NODE_ST[s.status] || ['', ''], c = n.config || {}, [tl, ti] = TYPES[n.type] || ['?', '?'];
     let body = '';
@@ -1043,6 +1296,8 @@ function bindCanvas() {
     if (e.button !== 0) return;
     if (e.target.closest('.dev-story, button')) { e.stopPropagation(); return; }
     const out = e.target.closest('[data-out]'), nodeEl = e.target.closest('.node'), edge = e.target.closest('[data-edge]');
+    if (componentGraphMode() && nodeEl) { sel = nodeEl.dataset.id; selStory = null; selEdge = null; drawNodes(); drawEdges(); renderSide(); return; }
+    if (componentGraphMode() && edge) return;
     if (out) { if (selStory) { selStory = null; drawNodes(); renderSide(); } drag = { mode: 'link', from: out.dataset.out }; e.stopPropagation(); return; }
     if (edge) { selEdge = +edge.dataset.edge; sel = null; selStory = null; drawEdges(); drawNodes(); renderSide(); return; }
     if (nodeEl) { const n = nodeById(nodeEl.dataset.id), p = toWorld(e); drag = { mode: 'node', id: n.id, dx: p.x - n.x, dy: p.y - n.y, moved: false }; return; }
@@ -1050,6 +1305,7 @@ function bindCanvas() {
   });
   window.onpointermove = e => {
     if (!drag || !$('canvas')) return;
+    if (fixedRecipeMode() && drag.mode !== 'pan') { drag = null; rejectFixedRecipeEdit(); return; }
     if (drag.mode === 'pan') { view.x = drag.vx + e.clientX - drag.sx; view.y = drag.vy + e.clientY - drag.sy; drag.moved = true; applyView(); }
     if (drag.mode === 'node') { const n = nodeById(drag.id), p = toWorld(e); n.x = Math.round((p.x - drag.dx) / 10) * 10; n.y = Math.round((p.y - drag.dy) / 10) * 10; drag.moved = true;
       const el = document.querySelector(`.node[data-id="${n.id}"]`); if (el) { el.style.left = n.x + 'px'; el.style.top = n.y + 'px'; } positionDevLanes(); drawEdges(); }
@@ -1058,6 +1314,7 @@ function bindCanvas() {
   window.onpointerup = e => {
     if (!drag || !$('canvas')) { drag = null; return; }
     const d = drag; drag = null; $('canvas').classList.remove('panning');
+    if (fixedRecipeMode() && d.mode !== 'pan') { rejectFixedRecipeEdit(); return; }
     if (d.mode === 'link') {
       const inEl = document.elementFromPoint(e.clientX, e.clientY)?.closest('.node');
       const to = inEl && inEl.dataset.id;
@@ -1071,8 +1328,10 @@ function bindCanvas() {
     if (d.mode === 'pan' && !d.moved && (sel || selEdge !== null || selStory)) { sel = null; selEdge = null; selStory = null; drawNodes(); drawEdges(); renderSide(); }
   };
   window.onkeydown = e => {
+    if (componentMode()) return;
     if (page !== 'workflow' || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || $('dlg').open) return;
     if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (fixedRecipeMode()) { e.preventDefault(); rejectFixedRecipeEdit(); return; }
       if (selStory) { e.preventDefault(); return; }
       if (selEdge !== null) { W.graph.edges.splice(selEdge, 1); selEdge = null; saveGraph(); drawEdges(); }
       else if (sel) deleteNode(sel);
@@ -1080,9 +1339,11 @@ function bindCanvas() {
   };
 }
 function createsCycle(from, to) { const st = [to], seen = new Set(); while (st.length) { const x = st.pop(); if (x === from) return true; if (seen.has(x)) continue; seen.add(x); for (const e of W.graph.edges) if (e.from === x) st.push(e.to); } return false; }
-function saveGraph() { graphDirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(saveGraphNow, 500); }
-async function saveGraphNow() { clearTimeout(saveTimer); if (!graphDirty) return; graphDirty = false; await api('/api/workflow/save', { graph: W.graph }); }
+function saveGraph() { if (componentMode() || rejectFixedRecipeEdit()) return; graphDirty = true; clearTimeout(saveTimer); saveTimer = setTimeout(saveGraphNow, 500); }
+async function saveGraphNow() { clearTimeout(saveTimer); if (fixedRecipeMode()) { graphDirty = false; return; } if (!graphDirty) return; graphDirty = false; await api('/api/workflow/save', { graph: W.graph }); }
 window.addNodeMenu = ev => {
+  if (rejectFixedRecipeEdit()) return;
+  if (componentMode()) return addComponentMenu(ev);
   closeMenu();
   const items = [['agent', '', 'Agent 节点（自定义指令）'], ['agent', 'prd', 'BMAD · PRD'], ['agent', 'architecture', 'BMAD · 架构'], ['agent', 'epics', 'BMAD · 拆分 Story'], ['dev', '', '开发看板'], ['human', '', '人工确认'], ['end', '', '结束'], ['start', '', '开始（需求）']];
   const m = document.createElement('div'); m.className = 'menu'; m.id = 'menu';
@@ -1093,7 +1354,31 @@ window.addNodeMenu = ev => {
   $('main').appendChild(m); setTimeout(() => document.addEventListener('click', closeMenu, { once: true }), 0);
 };
 function closeMenu() { const m = $('menu'); if (m) m.remove(); }
+async function addComponentMenu(ev) {
+  if (rejectFixedRecipeEdit()) return;
+  if (S.mode !== 'manual') return toast('组件由 Leader 自主调用；切到手动模式可自行添加');
+  closeMenu();
+  if (!componentRegistry().length) { const registry = await api('/api/components'); W.components = Array.isArray(registry) ? registry : registry.components || []; }
+  const m = document.createElement('div'); m.className = 'menu'; m.id = 'menu';
+  const r = ev.target.getBoundingClientRect(), mr = $('main').getBoundingClientRect(); m.style.left = Math.max(8, Math.min(r.left - mr.left, mr.width - 310)) + 'px'; m.style.top = r.bottom - mr.top + 4 + 'px'; m.style.width = '300px'; m.style.maxHeight = 'min(600px,70vh)'; m.style.overflowY = 'auto';
+  m.innerHTML = componentRegistry().map(c => `<div data-component="${esc(c.id)}"><span class="ic" style="--tc:var(--accent)">✦</span><span><b>${esc(c.name)}</b><br><small class="muted">${esc(componentEstimate(c))}</small></span></div>`).join('');
+  m.onclick = e => { const item = e.target.closest('[data-component]'); if (!item) return; const id = item.dataset.component; closeMenu(); componentDialog(id); };
+  $('main').appendChild(m); setTimeout(() => document.addEventListener('click', closeMenu, { once: true }), 0);
+}
+window.componentDialog = (id, retry) => {
+  if (rejectFixedRecipeEdit()) return;
+  const info = componentInfo(id), previous = componentCalls().find(c => c.id === retry), depths = Array.isArray(info.depthOptions) ? info.depthOptions : Object.keys(info.depthOptions || {});
+  dialog(`${previous ? '重做' : '添加'}组件：${info.name}`, `<div class="form"><div class="small muted component-summary">${esc(info.desc || '')}</div><div class="small muted">${esc(componentEstimate(info))}</div><label>调用 ID<input id="ccId" value="${esc('manual-' + Date.now().toString(36))}"></label><label>调用原因<input id="ccWhy" placeholder="这一步要解决什么问题" value="${esc(previous?.why || '')}"></label>${info.executor === 'agent' ? `<label>执行者<select id="ccAgent"><option value="">按组件默认角色分配</option>${agentOptions(previous?.agent || '')}</select></label>` : ''}${depths.length ? `<label>深度<select id="ccDepth">${depths.map(d => { const value = typeof d === 'string' ? d : d.id || d.value; return `<option value="${esc(value)}" ${previous?.depth === value ? 'selected' : ''}>${esc(typeof d === 'string' ? d : d.name || d.label || value)}</option>`; }).join('')}</select></label>` : ''}<label>输入 JSON<textarea id="ccInputs" rows="8">${esc(JSON.stringify(previous?.inputs || {}, null, 2))}</textarea></label><details class="more"><summary>查看输入参数说明</summary>${componentJson(info.inputs || {})}</details>${componentCalls().length ? `<label>前置依赖（可多选）<select id="ccDeps" multiple size="4">${componentCalls().map(c => `<option value="${esc(c.id)}" ${(previous?.depends_on || []).includes(c.id) ? 'selected' : ''}>${esc(c.id)} · ${esc(c.name || componentInfo(c.component).name)} · ${esc(NODE_ST[c.status]?.[0] || c.status)}</option>`).join('')}</select></label>` : ''}<div class="small muted">添加后会在依赖满足时自动执行。</div><div class="row"><span class="grow"></span><button class="primary" id="ccSubmit" onclick="submitComponent('${jsq(id)}')">添加并执行</button></div></div>`, true);
+};
+window.submitComponent = async component => {
+  if (rejectFixedRecipeEdit()) return;
+  let inputs; try { inputs = JSON.parse($('ccInputs').value); if (!inputs || typeof inputs !== 'object' || Array.isArray(inputs)) throw new Error(); } catch { return toast('输入必须是合法的 JSON 对象'); }
+  const id = $('ccId').value.trim(); if (!id) return toast('填写调用 ID');
+  const button = $('ccSubmit'); button.disabled = true;
+  try { await api('/api/components/call', { id, component, inputs, why: $('ccWhy').value.trim() || `手动调用${componentInfo(component).name}`, ...($('ccAgent')?.value ? { agent: $('ccAgent').value } : {}), ...($('ccDepth')?.value ? { depth: $('ccDepth').value } : {}), depends_on: Array.from($('ccDeps')?.selectedOptions || [], o => o.value) }); $('dlg').close(); await refresh(); selectComponent(id); toast('组件已添加，满足依赖后自动执行', 'ok'); } finally { if (button.isConnected) button.disabled = false; }
+};
 function addNode(type, preset, label) {
+  if (rejectFixedRecipeEdit()) return;
   const c = $('canvas').getBoundingClientRect();
   const id = type + '-' + Math.random().toString(36).slice(2, 7);
   const n = { id, type, title: preset ? label.replace('BMAD · ', '') : TYPES[type][0], x: Math.round(((c.width / 2 - view.x) / view.k - 115) / 10) * 10, y: Math.round(((c.height / 2 - view.y) / view.k - 40) / 10) * 10 };
@@ -1103,6 +1388,7 @@ function addNode(type, preset, label) {
   W.graph.nodes.push(n); sel = id; selEdge = null; selStory = null; saveGraph(); drawNodes(); drawEdges(); renderSide();
 }
 function deleteNode(id) {
+  if (rejectFixedRecipeEdit()) return;
   if (!confirm('删除这个节点？')) return;
   W.graph.nodes = W.graph.nodes.filter(n => n.id !== id); W.graph.edges = W.graph.edges.filter(e => e.from !== id && e.to !== id);
   sel = null; saveGraph(); drawNodes(); drawEdges(); renderSide();
@@ -1110,6 +1396,26 @@ function deleteNode(id) {
 window.deleteNode = deleteNode;
 
 // ---- 右侧节点面板 ----
+function renderComponentSide(box, n) {
+  const call = componentCall(n), state = nst(n.id), [status, cls] = NODE_ST[state.status] || [state.status, ''], side = box.querySelector('.side'), scroll = side?.scrollTop || 0, same = box.dataset.component === n.id;
+  if (same && document.activeElement?.id === 'componentAnswer' && call?.status === 'waiting') return;
+  if (n.type === 'start') {
+    const focused = same && document.activeElement?.id === 'reqText'; if (focused) return;
+    box.innerHTML = `<div class="side"><div class="sh"><b class="grow">需求原文</b><button class="ghost" onclick="sel=null;drawNodes();renderSide()">✕</button></div><div class="sb"><div class="small muted">Leader 根据需求和你的留言，自主决定调用哪些组件。</div><label class="field"><span>需求</span><textarea id="reqText" rows="12">${esc(W.requirement || '')}</textarea></label><div class="row"><span class="grow"></span><button class="primary" onclick="saveRequirement()">保存需求</button></div></div></div>`;
+  } else if (!call) {
+    box.innerHTML = `<div class="side"><div class="sh"><b class="grow">交付完成</b><button class="ghost" onclick="sel=null;drawNodes();renderSide()">✕</button></div><div class="sb"><div class="component-summary">${resultCopy(S.leaderBoard?.finished?.summary || '已完成交付')}</div></div></div>`;
+  } else {
+    const result = call.result, info = componentInfo(call.component), run = componentRun(call), files = componentArtifacts(result), findings = result?.findings || [], questions = result?.open_questions || [];
+    box.innerHTML = `<div class="side"><div class="sh"><b class="grow">${esc(call.name || info.name)}</b><button class="ghost" onclick="sel=null;drawNodes();renderSide()">✕</button></div><div class="sb"><div class="row"><span class="chip ${cls}">${esc(status)}</span><span class="muted small">${esc(call.id)}</span><span class="grow"></span><span class="small">${componentElapsed(call)}</span></div><div class="field"><span>为什么调用</span><div class="component-summary">${resultCopy(call.why || '按需求执行')}</div></div><div class="field"><span>执行者 / 模型</span><b style="color:${color(call.agent || S.leader)}">${esc(componentWho(call))}</b><div class="small muted">${esc(componentModel(call) || '—')}${call.depth ? ' · 深度 ' + esc(call.depth) : ''}</div><div class="small muted">${esc(componentEstimate(info))}</div></div><div class="field"><span>依赖</span><div class="row">${(call.depends_on || []).map(id => `<button class="link" onclick="selectComponent('${jsq(id)}')">${esc(id)} · ${esc(NODE_ST[componentCalls().find(c => c.id === id)?.status]?.[0] || '未找到')}</button>`).join('') || '<span class="small muted">无前置依赖</span>'}</div></div><div class="field"><span>输入</span>${componentJson(call.inputs || {})}</div>${call.error ? `<div class="box component-summary" style="color:var(--bad)">${resultCopy(call.error)}</div>` : ''}${result ? `<div class="field"><span>结果摘要${typeof result.pass === 'boolean' ? ` · ${result.pass ? '✓ 通过' : '✗ 未通过'}` : ''}</span><div class="component-summary">${resultCopy(result.summary || '暂无摘要')}</div></div><div class="field"><span>产出文件 · ${files.length}</span><div class="component-files">${files.map(path => isBrokenText(path) ? resultCopy(path) : `<button class="link" onclick="openComponentArtifact('${jsq(path)}')">▤ ${esc(path)}</button>`).join('') || '<span class="small muted">无文件产出</span>'}</div></div>${findings.length ? `<div class="field"><span>发现的问题 / 结论</span><ul style="margin:0;padding-left:20px">${findings.map(f => `<li class="component-summary">${typeof f === 'string' ? resultCopy(f) : resultCopy(JSON.stringify(displayResult(f), null, 2))}</li>`).join('')}</ul></div>` : ''}${result.tasks?.length ? `<div class="field"><span>拆分任务 · ${result.tasks.length}</span><button onclick="goPage('board')">打开任务看板</button>${componentJson(result.tasks)}</div>` : ''}${questions.length ? `<div class="field"><span>需要澄清</span>${componentJson(questions)}</div>` : ''}` : '<div class="small muted">执行结束后，这里会显示结果和产出。</div>'}${call.status === 'waiting' ? `<div class="box"><div class="component-summary">${resultCopy(S.leaderBoard?.ask?.q || '请回答澄清问题')}</div><button onclick="goPage('leader')">回答 Leader</button></div>` : ''}<div class="row">${run ? `<button class="primary" onclick="openTerm('${jsq(run.id)}')">打开执行终端</button><button onclick="openLog('${jsq(run.id)}','任务')">查看任务与结果</button>` : '<span class="small muted">暂无执行日志</span>'}${['running', 'queued'].includes(call.status) && run ? `<button class="bad" onclick="cancelRun('${jsq(run.id)}')">取消</button>` : ''}${!fixedRecipeMode() && S.mode === 'manual' && call.status === 'failed' ? `<button onclick="componentDialog('${jsq(call.component)}','${jsq(call.id)}')">新建调用重做</button>` : ''}</div></div></div>`;
+  }
+  if (call?.component === 'compare' && call.runs?.length) box.querySelector('.sb').insertAdjacentHTML('beforeend', `<div class="field"><span>方案执行记录 · ${call.runs.length}</span>${call.runs.map(r => `<div class="box"><div class="row"><b style="color:${color(r.agent)}">${esc(agentName(r.agent))}</b><span class="chip">${esc(r.variant || '执行')}</span><span class="small muted">${esc(RUN_ST[r.status] || r.status)}</span></div><div class="small muted component-summary">${esc(r.model || '默认模型')}</div><div class="row" style="margin-top:6px"><button class="link" onclick="openTerm('${jsq(r.id)}')">打开执行终端</button><button class="link" onclick="openLog('${jsq(r.id)}','结果')">查看结果</button></div></div>`).join('')}</div>`);
+  if (call?.status === 'waiting' && S.leaderBoard?.ask && !S.leaderBoard.ask.answered) {
+    box.querySelector('button[onclick="goPage(\'leader\')"]')?.remove();
+    box.querySelector('.sb').insertAdjacentHTML('beforeend', '<label class="field"><span>你的回答</span><textarea id="componentAnswer" rows="3"></textarea></label><div class="row"><span class="grow"></span><button class="primary" onclick="answerComponent()">回答并继续</button></div>');
+  }
+  box.dataset.component = n.id; if (same && box.querySelector('.side')) box.querySelector('.side').scrollTop = scroll; tick();
+}
+window.answerComponent = async () => { const text = $('componentAnswer')?.value.trim(); if (!text) return toast('先写回答'); await api('/api/leader/answer', { text }); toast('已回答，继续执行', 'ok'); await refresh(); };
 function renderDevStorySide(box) {
   const c = devLaneData().byKey.get(selStory); if (!c) { selStory = null; box.innerHTML = ''; box._html = null; return; }
   const s = c.s, status = Object.fromEntries(COLS)[s.status] || s.status, impl = [...(S.runs || []).filter(r => r.kind === 'implement' && storyKeyFor(r.storyKey) === s.key), ...(c.tl.events || []).filter(e => e.type === 'impl' && e.run).map(e => ({ id: e.run, createdAt: e.t }))].sort((a, b) => String(b.createdAt || b.startedAt || '').localeCompare(String(a.createdAt || a.startedAt || '')))[0];
@@ -1133,6 +1439,7 @@ function renderSide() {
   box._html = null; delete box.dataset.story;
   const n = sel && nodeById(sel);
   if (!n) { box.innerHTML = ''; return; }
+  if (componentGraphMode()) return renderComponentSide(box, n);
   const c = n.config || {}, [tl, ti] = TYPES[n.type];
   let form = `<label class="field"><span>标题</span><input value="${esc(n.title || '')}" oninput="setNodeField('title', this.value)"></label>`;
   if (n.type === 'start') form += `<label class="field"><span>需求（用自己的话写：做什么、给谁用、平台、关键约束）</span><textarea id="reqText" rows="10">${esc(W.requirement || '')}</textarea></label>
@@ -1157,8 +1464,8 @@ function renderSide() {
 }
 function skillChips(ids) { return ids.length ? ids.map(id => `<span class="chip" title="${esc(id)}">🧩 ${esc(id.split(':').pop())}</span>`).join('') : '<span class="small muted">没选技能</span>'; }
 window.goPage = p => { page = p; localStorage.setItem('page', p); renderTop(); renderPage(); enter(); };
-window.setNodeField = (k, v) => { const n = nodeById(sel); n[k] = v; saveGraph(); drawNodes(); drawEdges(); };
-window.setCfg = (k, v) => { const n = nodeById(sel); n.config = { ...(n.config || {}), [k]: v }; saveGraph(); drawNodes(); if (['agent', 'preset'].includes(k)) renderSide(); };
+window.setNodeField = (k, v) => { if (rejectFixedRecipeEdit()) return; const n = nodeById(sel); n[k] = v; saveGraph(); drawNodes(); drawEdges(); };
+window.setCfg = (k, v) => { if (rejectFixedRecipeEdit()) return; const n = nodeById(sel); n.config = { ...(n.config || {}), [k]: v }; saveGraph(); drawNodes(); if (['agent', 'preset'].includes(k)) renderSide(); };
 window.saveRequirement = async () => { await api('/api/requirement', { text: $('reqText').value }); toast('需求已保存', 'ok'); W.requirement = $('reqText').value; refresh(); };
 function renderRunBox() {
   const box = $('runBox'), n = sel && nodeById(sel); if (!box || !n) return;
@@ -1249,7 +1556,19 @@ window.pickSkillsFor = () => { const n = nodeById(sel); skillPicker(`给「${n.t
 $('leaderSkills').onclick = () => skillPicker('Leader 默认技能（leader 跑的每个任务都会带上）', S.leaderSkills || [], async ids => { S = await api('/api/leader', { skills: ids }); renderTop(); toast(`Leader 技能 ${ids.length} 个`, 'ok'); });
 
 // ================= 看板（开发阶段） =================
+function componentBoard() {
+  const calls = componentCalls(), implementations = calls.filter(c => ['implement', 'fix'].includes(c.component)), used = new Set(), tasks = [];
+  for (const split of calls.filter(c => c.component === 'split' && c.result?.tasks?.length)) for (const [i, raw] of split.result.tasks.entries()) {
+    const t = typeof raw === 'string' ? { title: raw } : raw || {}, title = t.title || t.name || t.goal || `任务 ${i + 1}`, key = t.id || t.key || t.taskId || t.task_id;
+    const matching = implementations.filter(c => { const input = c.inputs || {}, refs = [input.taskId, input.task_id, input.task?.id, input.task?.key, input.id]; return key && refs.includes(key) || input.title === title || input.task?.title === title || typeof input.task === 'string' && [key, title].includes(input.task) || title.length > 4 && String(input.instructions || input.instruction || '').includes(title); }), impl = matching.at(-1);
+    matching.forEach(c => used.add(c.id)); tasks.push({ title, goal: t.goal || t.description || '', acceptance: t.acceptance || t.acceptance_criteria || t.criteria, status: impl?.status || ({ 'in-progress': 'running', 'ready-for-dev': 'pending', backlog: 'pending', completed: 'done' }[t.status] || t.status || 'pending'), agent: impl?.agent || t.agent || t.suggested_agent || t.suggestedAgent, call: impl || split, key: key || `${split.id}.${i + 1}` });
+  }
+  for (const c of implementations.filter(c => !used.has(c.id))) tasks.push({ title: c.inputs?.title || c.name || '实现', goal: c.inputs?.goal || c.why || c.inputs?.instructions || '', status: c.status, agent: c.agent, call: c, key: c.id });
+  const columns = [['pending', '待执行'], ['running', '执行中'], ['waiting', '待回答'], ['failed', '失败 / 取消'], ['done', '完成']], normalized = t => t.status === 'queued' ? 'running' : t.status === 'cancelled' ? 'failed' : columns.some(c => c[0] === t.status) ? t.status : 'pending';
+  return `<div class="card row"><b>组件任务看板</b><span class="small muted">${tasks.filter(t => normalized(t) === 'done').length}/${tasks.length} 个任务完成 · ${calls.length} 个组件调用</span><span class="grow"></span><button onclick="goPage('workflow')">查看实况图</button></div>${!tasks.length ? '<div class="card component-empty">拆分组件的任务或实现组件的调用会自动显示在这里。</div>' : `<div class="board">${columns.map(([st, label]) => { const list = tasks.filter(t => normalized(t) === st); return `<div class="col"><h3><span>${label}</span><span>${list.length}</span></h3>${list.map(t => `<div class="component-task"><div class="row small muted"><span>${esc(t.key)}</span><span class="grow"></span><span>${esc(NODE_ST[t.status]?.[0] || t.status)}</span></div><h4>${resultCopy(t.title)}</h4>${t.goal ? `<p>${resultCopy(t.goal)}</p>` : ''}${t.agent ? `<span class="small" style="color:${color(t.agent)}">${esc(agentName(t.agent))}</span>` : ''}${t.acceptance ? `<details class="more"><summary>验收要点</summary><div class="small component-summary">${resultCopy(typeof t.acceptance === 'string' ? t.acceptance : JSON.stringify(displayResult(t.acceptance), null, 2))}</div></details>` : ''}<div class="row"><button class="link" onclick="selectComponent('${jsq(t.call.id)}')">查看调用</button>${componentRun(t.call) ? `<button class="link" onclick="openTerm('${jsq(componentRun(t.call).id)}')">执行终端</button>` : ''}</div></div>`).join('') || '<div class="small muted">—</div>'}</div>`; }).join('')}</div>`}`;
+}
 function devView() {
+  if (componentMode()) return componentBoard();
   if (!S.hasEpics) return `<div class="card">还没有 Story。先在工作流里跑完“拆分 Story”节点。</div>`;
   const planRun = S.runs.find(r => r.kind === 'plan' && ['queued', 'running'].includes(r.status));
   const total = S.stories.length, done = S.stories.filter(s => s.status === 'done').length;
@@ -1341,7 +1660,7 @@ async function hydrate() {
 
 // ================= Leader 控制台 =================
 const LEADER_OPEN = new Set(), LEADER_HISTORY = new Set(); // 按项目保留展开状态，不受自动重绘影响
-const LEADER_ACT = { dispatch: '派活', set_status: '验收', approve_node: '通过节点', rerun_node: '重做节点', ask_human: '提问', finish: '宣布完成' };
+const LEADER_ACT = { call: '调用组件', dispatch: '派活', set_status: '验收', approve_node: '通过节点', rerun_node: '重做节点', ask_human: '提问', finish: '宣布完成' };
 const leaderKey = (type, id = '') => S.project + '|' + type + '|' + id;
 const leaderLogKey = t => leaderKey('round', t.run || t.at);
 const leaderText = s => resultText(s, true);
@@ -1369,6 +1688,7 @@ function leaderPills(actions) {
     if (success && passedShown) return ''; if (success) passedShown = true;
     let label = LEADER_ACT[a.type] || a.type, c = 'var(--muted)', tip = [a.title, a.story, a.question, failed ? a.outcome : ''].filter(Boolean).join('\n');
     if (a.type === 'dispatch') { label = '派活→' + agentName(a.agent); c = color(a.agent); }
+    else if (a.type === 'call') { label = (componentInfo(a.component).name || a.component) + (a.agent ? ' → ' + agentName(a.agent) : ''); c = color(a.agent || S.leader); tip = [a.id, a.why, a.depth, failed ? a.outcome : ''].filter(Boolean).join('\n'); }
     else if (a.type === 'set_status') { label = (a.status === 'done' ? '✓ ' : '✗ ') + target; c = a.status === 'done' ? 'var(--ok)' : 'var(--bad)'; }
     else if (a.type === 'approve_node') { label = '通过节点 ' + target; c = 'var(--ok)'; }
     else if (a.type === 'rerun_node') { label = '重做节点 ' + target; c = 'var(--bad)'; }
@@ -1380,7 +1700,8 @@ function leaderPills(actions) {
   }).join('');
 }
 function leaderRoundBody(t) {
-  return `<ul>${(t.actions || []).map((a, i) => `<li><b>${leaderCopy(LEADER_ACT[a.type] || a.type)}</b>${a.agent ? ` → <span style="color:${color(a.agent)}">${leaderCopy(agentName(a.agent))}</span>` : ''} ${leaderCopy(a.story ? 'Story ' + shortKey(a.story) : a.node ? '节点 ' + leaderNode(a.node) : a.title || '')}${a.status ? '：' + (a.status === 'done' ? '通过' : '打回') : ''}
+  return `<ul>${(t.actions || []).map((a, i) => `<li><b>${leaderCopy(a.type === 'call' ? '调用 ' + (componentInfo(a.component).name || a.component) : LEADER_ACT[a.type] || a.type)}</b>${a.agent ? ` → <span style="color:${color(a.agent)}">${leaderCopy(agentName(a.agent))}</span>` : ''} ${leaderCopy(a.type === 'call' ? [a.id, a.depth].filter(Boolean).join(' · ') : a.story ? 'Story ' + shortKey(a.story) : a.node ? '节点 ' + leaderNode(a.node) : a.title || '')}${a.status ? '：' + (a.status === 'done' ? '通过' : '打回') : ''}
+      ${a.why ? `<div class="leader-copy leader-action-text">${leaderCopy(a.why)}</div>` : ''}${a.type === 'call' && a.depends_on?.length ? `<div class="small muted">依赖：${a.depends_on.map(esc).join('、')}</div>` : ''}
       ${a.feedback ? `<div class="leader-copy leader-action-text" style="color:var(--bad)">打回意见：${leaderCopy(a.feedback)}</div>` : ''}${a.instructions ? `<div class="leader-copy leader-action-text muted">${leaderCopy(a.instructions)}</div>` : ''}
       ${a.type === 'dispatch' ? skillRail('log|' + S.project + '|' + t.run + '|' + i, a.skills, false, a.autoSkills || []) : ''}
       ${a.question ? `<div class="leader-copy leader-action-text">${leaderCopy(a.question)}</div>` : ''}${a.summary ? `<div class="leader-copy leader-action-text">${leaderCopy(a.summary)}</div>` : ''}
@@ -1414,15 +1735,15 @@ function leaderTimeline(L) {
 }
 function leaderView() {
   if (S.mode !== 'leader') return `<div class="card row leader-status-off"><b>${S.mode === 'auto' ? '当前为规则自动模式' : '未开启 Leader 统筹'}</b><span class="grow"></span><button class="primary" onclick="$('modeSeg').querySelector('[data-m=leader]').click()">切到 Leader 统筹</button></div><div class="leader-notices">${workflowNotices()}</div>`;
-  const L = S.leaderBoard || {}, pr = L.progress, state = leaderState(L), agent = S.agents.find(a => a.id === S.leader) || {}, total = S.stories.length, done = S.stories.filter(s => s.status === 'done').length;
+  const L = S.leaderBoard || {}, pr = L.progress, state = leaderState(L), agent = S.agents.find(a => a.id === S.leader) || {}, total = componentMode() ? componentCalls().length : S.stories.length, done = componentMode() ? componentCalls().filter(c => c.status === 'done').length : S.stories.filter(s => s.status === 'done').length;
   const since = state.run && (state.run.startedAt || state.run.createdAt), meta = `已唤醒 ${L.ticks || 0} 次${L.lastTickAt ? '\n上次唤醒：' + new Date(L.lastTickAt).toLocaleString() : ''}`;
   const primary = state.kind === 'paused' ? `<button class="primary" onclick="api('/api/leader/resume',{}).then(load)">继续</button>` : state.kind === 'idle' ? `<button class="primary" ${!S.leader ? 'disabled' : ''} onclick="api('/api/leader/tick',{}).then(load)">立即唤醒</button>` : state.kind === 'thinking' ? `<button class="primary" onclick="openLog('${jsq(state.run.id)}')">实时日志</button>` : '';
   const levels = [['fast', '快速', '实现者自测 + Leader 复跑测试就放行，不派交叉验收'], ['standard', '标准', 'Leader 亲自验收、逐条给证据；拿不准才派交叉验收'], ['strict', '严格', '每个 Story 都换人交叉验收，最稳但最慢']];
   const answersKey = leaderKey('answers');
   return `<div class="card leader-status">
     <div class="leader-person" title="${esc(meta)}"><div class="row"><b style="color:${color(S.leader)}">${leaderCopy(agentName(S.leader))}</b>${agent.effectiveModel ? `<span class="leader-model" style="color:${color(S.leader)}" title="${esc(agent.effectiveModel)}">${leaderCopy(agent.effectiveModel)}</span>` : ''}</div><div class="row small"><span class="leader-state ${state.kind}" style="--state:var(--${state.color})"><span class="dot"></span>${state.label}${since ? ` · <span data-since="${esc(since)}">${fmtDur(Date.now() - Date.parse(since))}</span>` : ''}</span><span class="muted small">唤醒 ${L.ticks || 0} 次</span></div></div>
-    <div class="leader-progress"><div class="row small"><span>Story ${done} / ${total}</span><span class="grow"></span>${tlProject === S.project && Array.isArray(TL) ? `<span class="muted">返工 ${tlReworks()} 次</span>` : ''}</div><progress value="${done}" max="${total || 1}" aria-label="Story 完成 ${done} / ${total}"></progress></div>
-    <div class="row leader-controls"><span class="seg" aria-label="验收档位">${levels.map(([k, label, tip]) => `<button class="${S.acceptLevel === k ? 'on' : ''}" aria-pressed="${S.acceptLevel === k}" title="${esc(tip)}" onclick="setAcceptLevel('${k}')">${label}</button>`).join('')}</span>${primary}</div>
+    <div class="leader-progress"><div class="row small"><span>${componentMode() ? '组件' : 'Story'} ${done} / ${total}</span><span class="grow"></span>${!componentMode() && tlProject === S.project && Array.isArray(TL) ? `<span class="muted">返工 ${tlReworks()} 次</span>` : ''}</div><progress value="${done}" max="${total || 1}" aria-label="${componentMode() ? '组件' : 'Story'} 完成 ${done} / ${total}"></progress></div>
+    <div class="row leader-controls">${componentMode() ? '<span class="small muted">流程深浅由 Leader 自主判断</span>' : `<span class="seg" aria-label="验收档位">${levels.map(([k, label, tip]) => `<button class="${S.acceptLevel === k ? 'on' : ''}" aria-pressed="${S.acceptLevel === k}" title="${esc(tip)}" onclick="setAcceptLevel('${k}')">${label}</button>`).join('')}</span>`}${primary}</div>
     ${L.error ? `<div class="small leader-status-error">${leaderCopy(L.error)}</div>` : ''}</div>
   <div class="leader-notices">${workflowNotices()}</div>
   ${L.ask && !L.ask.answered ? `<div class="card leader-ask"><b style="color:var(--warn)">Leader 在等你回答</b><div class="leader-copy">${leaderCopy(L.ask.q)}</div><label class="field" style="margin-top:8px"><span>你的回答</span><textarea id="leaderAns" rows="2"></textarea></label><div class="row" style="margin-top:6px"><span class="grow"></span><button class="primary" onclick="answerLeader()">回答</button></div></div>` : ''}
@@ -1437,12 +1758,46 @@ window.noteLeader = async () => { const t = $('leaderNote').value.trim(); if (!t
 window.answerLeader = async () => { const t = $('leaderAns').value.trim(); if (!t) return toast('先写回答'); S = await api('/api/leader/answer', { text: t }); renderPage(); };
 
 // ================= 运行记录 =================
+function devtaskElapsed(run) {
+  if (!run.startedAt) return '—';
+  if (run.endedAt) return fmtDur(Date.parse(run.endedAt) - Date.parse(run.startedAt));
+  return run.status === 'running' ? `<span data-since="${esc(run.startedAt)}">${fmtDur(Date.now() - Date.parse(run.startedAt))}</span>` : '—';
+}
+function devtasksView() {
+  const tasks = [...devtasks()].sort((a, b) => Date.parse(b.createdAt || b.startedAt || 0) - Date.parse(a.createdAt || a.startedAt || 0));
+  const count = devtaskRunningCount(), queued = tasks.filter(r => r.status === 'queued').length;
+  return `<section class="card devtask-section" id="devtasksSection" aria-label="面板任务"><div class="devtask-heading"><h3>面板任务</h3><span class="chip">全局</span>${count ? `<span class="chip run">${count} 运行中</span>` : ''}${queued ? `<span class="chip warn">${queued} 排队</span>` : ''}<span class="grow"></span><span class="small muted">跨项目托管的开发任务</span></div>${tasks.length ? `<div class="devtask-table-wrap"><table class="devtask-table"><thead><tr><th>任务</th><th>Agent · 模型 · effort</th><th>状态</th><th>耗时</th><th>操作</th></tr></thead><tbody>${tasks.map(run => {
+    const active = ['queued', 'running'].includes(run.status), stateClass = run.status === 'running' ? 'run' : run.status === 'queued' ? 'warn' : run.status === 'finished' ? 'ok' : ['failed', 'interrupted'].includes(run.status) ? 'bad' : '';
+    return `<tr data-devtask="${esc(run.id)}"><td><div class="devtask-title">${esc(run.title || run.id)}</div><div class="small muted" title="${esc(run.cwd || '')}">${scheduleDate(run.createdAt || run.startedAt)}</div><div class="small muted devtask-output" data-live="${esc(run.id)}" title="${esc(run.lastLine || '')}">${esc(run.lastLine || '')}</div></td><td><div style="color:${color(run.agent)}">${esc(agentName(run.agent))}</div><div class="small muted devtask-meta">${esc(run.model || '默认模型')}${run.effort ? ` · ${esc(run.effort)}${run.effortIgnored ? '（effort 已忽略）' : ''}` : ''}</div></td><td><span class="chip ${stateClass}">${esc(RUN_ST[run.status] || run.status)}</span>${run.cancelRequested && run.status === 'running' ? '<div class="small muted">正在取消…</div>' : ''}${run.exitCode !== undefined && run.exitCode !== null ? `<div class="small muted" style="margin-top:4px">退出码 ${esc(run.exitCode)}</div>` : ''}${run.error ? `<div class="small muted devtask-meta" title="${esc(run.error)}">${esc(run.error)}</div>` : ''}</td><td class="small devtask-duration">${devtaskElapsed(run)}</td><td><div class="devtask-actions"><button class="link" onclick="openTerm('${jsq(run.id)}')">终端</button><button class="link" onclick="devtaskReply('${jsq(run.id)}')">回复</button>${active ? `<button class="link bad" ${run.cancelRequested ? 'disabled' : ''} onclick="cancelDevtask('${jsq(run.id)}',this)">取消</button>` : ''}</div></td></tr>`;
+  }).join('')}</tbody></table></div>` : '<div class="component-empty">还没有面板任务。助手通过派活接口提交后，任务和执行终端会显示在这里。</div>'}</section>`;
+}
+function renderDevtasks() {
+  const section = $('devtasksSection');
+  if (section && page === 'runs') { section.outerHTML = devtasksView(); tick(); }
+}
+window.showDevtasks = () => { goPage('runs'); $('devtasksSection')?.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' }); };
+window.devtaskReply = async id => {
+  const run = devtasks().find(r => r.id === id);
+  dialog(`最终回复 · ${run?.title || id}`, '<pre class="log" id="devtaskReplyBody">正在读取回复…</pre>');
+  const destination = $('devtaskReplyBody');
+  try {
+    const reply = await api('/api/devtask/reply' + q({ id }));
+    if (destination !== $('devtaskReplyBody')) return;
+    destination.textContent = reply.text || (['queued', 'running'].includes(findRun(id)?.status) ? '任务尚未生成最终回复。可打开终端查看实时进度。' : '这个任务没有保存最终回复。');
+  } catch (error) { if (destination === $('devtaskReplyBody')) destination.textContent = error.message || '读取回复失败'; }
+};
+window.cancelDevtask = async (id, button) => {
+  button.disabled = true;
+  try { await api('/api/devtask/cancel', { id }); await refresh(); termSync(); }
+  finally { if (button.isConnected) button.disabled = false; }
+};
 let showCancelled = false;
 window.toggleCancelled = () => { showCancelled = !showCancelled; renderPage(); };
 function runsView() {
+  if (!S.project) return devtasksView() + '<div class="card small muted">打开项目后，可在这里查看该项目的运行记录和文档。</div>';
   const active = S.runs.filter(r => ['queued', 'running'].includes(r.status));
   const label = r => r.nodeId ? `节点 ${esc((W && W.graph.nodes.find(n => n.id === r.nodeId) || {}).title || r.nodeId)}` : r.stage ? esc(r.stage) : r.storyKey ? 'Story ' + shortKey(r.storyKey) : '全部 Story';
-  return `<div class="card"><div class="row"><h3 style="margin:0">运行记录</h3><span class="small muted">${active.length ? `${active.filter(r => r.status === 'running').length} 运行中 · ${active.filter(r => r.status === 'queued').length} 排队` : '空闲'}</span><span class="grow"></span><button class="link" onclick="toggleCancelled()">${showCancelled ? '隐藏' : '显示'}已取消（${S.runs.filter(r => r.status === 'cancelled').length}）</button></div>
+  return `${devtasksView()}<div class="card"><div class="row"><h3 style="margin:0">项目运行记录</h3><span class="small muted">${active.length ? `${active.filter(r => r.status === 'running').length} 运行中 · ${active.filter(r => r.status === 'queued').length} 排队` : '空闲'}</span><span class="grow"></span><button class="link" onclick="toggleCancelled()">${showCancelled ? '隐藏' : '显示'}已取消（${S.runs.filter(r => r.status === 'cancelled').length}）</button></div>
     <table class="list"><thead><tr><th>开始</th><th>类型</th><th>对象</th><th>Agent</th><th>耗时</th><th>状态</th><th></th></tr></thead><tbody>
     ${S.runs.filter(r => showCancelled || r.status !== 'cancelled').map(r => `<tr><td>${new Date(r.createdAt).toLocaleString()}</td><td>${KIND[r.kind] || r.kind}</td><td>${label(r)}</td>
       <td style="color:${color(r.agent)}">${esc(agentName(r.agent))}</td><td>${r.startedAt ? (r.endedAt ? fmtDur(Date.parse(r.endedAt) - Date.parse(r.startedAt)) : `<span data-since="${r.startedAt}"></span>`) : '—'}</td>
@@ -1471,7 +1826,7 @@ function termTheme() {
     brightBlack: '#6c7789', brightRed: '#d2394c', brightGreen: '#148756', brightYellow: '#a7750c', brightBlue: '#4a63ee', brightMagenta: '#a056cb', brightCyan: '#158e9a', brightWhite: '#141b26'
   };
 }
-function termRun(tab) { return S?.runs.find(r => r.id === tab.id) || tab.run; }
+function termRun(tab) { return findRun(tab.id) || tab.run; }
 function termCanInput(tab) { return !!tab && tab.pty && termRun(tab).status === 'running'; }
 function termWrite(tab, text) {
   if (!text || tab.disposed) return;
@@ -1509,7 +1864,7 @@ async function termReload(tab) {
     if (tab.disposed) return;
     if (d.run) {
       tab.run = d.run;
-      const current = S?.runs.find(r => r.id === tab.id);
+      const current = findRun(tab.id);
       if (current) Object.assign(current, d.run);
       tab.pty = !!d.run.pty;
     }
@@ -1571,7 +1926,7 @@ termDark.addEventListener('change', () => {
   for (const tab of TERM.tabs) tab.term.options.theme = termTheme();
 });
 async function openTerm(runId, run = null) {
-  const r = S?.runs.find(x => x.id === runId) || run || TERM.tabs.find(t => t.id === runId)?.run;
+  const r = findRun(runId) || run || TERM.tabs.find(t => t.id === runId)?.run;
   if (!r) return toast('找不到这个运行');
   let tab = TERM.tabs.find(t => t.id === runId);
   if (!tab) {
@@ -1609,11 +1964,11 @@ async function openTerm(runId, run = null) {
 window.openTerm = openTerm;
 function termShow(open) {
   TERM.open = open; $('term').classList.toggle('open', open); document.body.classList.toggle('term-open', open);
-  if (open && !TERM.tabs.length) { for (const r of S.runs.filter(x => ['running', 'queued'].includes(x.status))) openTerm(r.id); }
+  if (open && !TERM.tabs.length) { for (const r of allRuns().filter(x => ['running', 'queued'].includes(x.status))) openTerm(r.id); }
   if (open) termScheduleFit();
 }
 function termRender() {
-  const running = S ? S.runs.filter(r => ['running', 'queued'].includes(r.status)).length : 0;
+  const running = allRuns().filter(r => ['running', 'queued'].includes(r.status)).length;
   $('termCount').innerHTML = running ? `<span class="badge">${running}</span>` : '';
   $('termEmpty').style.display = TERM.tabs.length ? 'none' : '';
   const active = TERM.tabs.find(t => t.id === TERM.active), canInput = termCanInput(active);
@@ -1665,11 +2020,11 @@ function termSync() { // 状态刷新时：新开始的任务自动加标签，�
       tab.status = r.status;
     }
   }
-  if (TERM.open) for (const r of S.runs.filter(x => x.status === 'running')) if (!TERM.tabs.find(t => t.id === r.id)) openTerm(r.id).catch(() => {});
+  if (TERM.open) for (const r of allRuns().filter(x => x.status === 'running')) if (!TERM.tabs.find(t => t.id === r.id)) openTerm(r.id).catch(() => {});
   termRender();
 }
 window.openLog = async (id, tab = '日志') => {
-  const rr = S && S.runs.find(x => x.id === id);
+  const rr = findRun(id);
   if (rr && tab === '日志') return openTerm(id);
   const d = await api('/api/log' + q({ id }));
   if (tab === '日志') return openTerm(id, d.run);
@@ -1685,6 +2040,11 @@ window.openLog = async (id, tab = '日志') => {
   show(tab);
 };
 window.openDoc = async p => { const d = await api('/api/doc' + q({ path: p })); dialog(p, /\.md$/i.test(p) ? md(d.text) : `<pre class="log">${esc(d.text)}</pre>`); };
+window.openComponentArtifact = async p => {
+  const d = await api('/api/components/artifact' + q({ path: p }));
+  const bitmap = typeof d.data === 'string' && /^image\/(png|jpeg|gif|webp)$/i.test(d.mime || '');
+  dialog(p, bitmap ? `<img src="data:${esc(d.mime)};base64,${esc(d.data)}" alt="${esc(p)}" style="display:block;max-width:100%;height:auto;margin:auto">` : /\.md$/i.test(p) ? md(String(d.text ?? '')) : `<pre class="log">${esc(d.text ?? '')}</pre>`);
+};
 window.openDiff = async (id, file) => {
   const d = await api('/api/diff' + q({ id, file }));
   dialog(`${file}${d.isNew ? '（新文件）' : d.isDeleted ? '（已删除）' : ''}`, `<div class="diff">${d.diff.split('\n').map(l => `<div class="${l[0] === '+' ? 'a' : l[0] === '-' ? 'd' : l.startsWith('@@') ? 'h' : ''}">${esc(l)}</div>`).join('')}</div>`);
@@ -1702,16 +2062,18 @@ window.newProjectDialog = () => {
     <label>项目名<input id="npName" placeholder="例：thermostat-v2"></label>
     <label>从一句需求开始<textarea id="npRequirement" rows="3" placeholder="例：写一个 index.html，页面中间显示当前时间，每秒刷新"></textarea></label>
     <label>放在哪个文件夹<div class="row"><input id="npParent" class="grow" value="${esc(S.projectsRoot)}"><button onclick="pickFolder(p=>$('npParent').value=p)">浏览…</button></div></label>
-    <label>模板<select id="npTpl"><option value="embedded">嵌入式（带 embedded-standards 约束 + 嵌入式角色）</option><option value="generic">通用软件</option></select></label>
-    <div class="small muted">会自动：建目录 → 安装 BMAD（五家都能读）→ git init → 分诊需求、推荐工作流。需求也可以创建后再写。大约 1 分钟。</div>
+    <label>编排模式<select id="npOrchestration"><option value="components">组件自主编排（Leader 决定流程深浅）</option><option value="template">模板流程（BMAD / 快速实现等）</option></select></label>
+    <label>项目规范<select id="npTpl"><option value="generic">通用软件</option><option value="embedded">嵌入式（带 embedded-standards 约束 + 嵌入式角色）</option></select></label>
+    <div class="small muted">新项目默认组件自主编排，Leader 按需求选择组件；模板模式会安装 BMAD 并推荐工作流。需求也可以创建后再写。</div>
     <div class="row"><span class="grow"></span><button class="primary" onclick="createProject()">创建</button></div>
     <pre class="log" id="setupLog" style="max-height:260px;overflow:auto"></pre></div>`, true);
   setTimeout(() => $('npName').focus(), 50);
 };
 window.createProject = async () => {
-  const requirement = $('npRequirement').value.trim();
-  const job = await api('/api/project/create', { name: $('npName').value.trim(), parent: $('npParent').value.trim(), template: $('npTpl').value, requirement, mode: S.mode || 'manual' });
-  watchSetup(job.dir, async () => { $('dlg').close(); page = 'workflow'; localStorage.setItem('page', page); sel = 'start'; toast(requirement ? '项目已创建，正在根据需求推荐工作流' : '项目已创建，先在“需求”节点里写需求', 'ok'); await load(); });
+  const requirement = $('npRequirement').value.trim(), orchestration = $('npOrchestration').value;
+  const job = await api('/api/project/create', { name: $('npName').value.trim(), parent: $('npParent').value.trim(), template: $('npTpl').value, requirement, orchestration, mode: S.mode || 'manual' });
+  const ready = async () => { $('dlg').close(); page = 'workflow'; wfView = 'canvas'; localStorage.setItem('page', page); localStorage.setItem('wfView', wfView); sel = null; await load(); if (!requirement) { sel = W?.graph.nodes.find(n => n.type === 'start')?.id; drawNodes(); renderSide(); } toast(requirement ? orchestration === 'components' ? '项目已创建，Leader 将按需求选择组件' : '项目已创建，正在根据需求推荐工作流' : '项目已创建，先在需求节点里写需求', 'ok'); };
+  if (job.status === 'done') await ready(); else watchSetup(job.dir, ready);
 };
 function watchSetup(dir, done) {
   const t = setInterval(async () => {
@@ -1920,12 +2282,26 @@ window.loginAgent = (id, button) => settingsAction(button, async () => { await p
 // ================= 实时更新 =================
 const es = new EventSource('/api/events');
 let pending = null;
+es.addEventListener('schedule', e => {
+  const event = JSON.parse(e.data);
+  if (S && Number.isFinite(Number(event.runningCount))) S.scheduleRunningCount = Number(event.runningCount);
+  renderScheduleIndicator(); renderCrew();
+  if (event.phase === 'started') toast(`定时任务“${event.name}”开始运行`, 'ok');
+  else if (event.phase === 'finished') toast(`定时任务“${event.name}”已结束${event.result ? '：' + event.result : ''}`, /失败|failed|error/i.test(event.result || '') ? 'bad' : 'ok');
+  else if (event.phase === 'skipped') toast(`定时任务“${event.name}”跳过：上次未完成`);
+  if (page === 'schedules') renderSchedules();
+});
+es.addEventListener('devtask', e => {
+  const event = JSON.parse(e.data);
+  mergeDevtask(event.run, event.runningCount);
+  renderDevtaskIndicator(); renderCrew(); renderDevtasks(); termSync();
+});
 // EventSource reconnects do not replay missed log chunks; fill from the file.
-es.addEventListener('open', () => { for (const tab of TERM.tabs) termReload(tab); });
+es.addEventListener('open', () => { for (const tab of TERM.tabs) termReload(tab); if (S) refresh().then(termSync).catch(() => {}); });
 es.addEventListener('state', () => { clearTimeout(pending); pending = setTimeout(() => refresh().then(termSync).catch(() => {}), 250); });
 es.addEventListener('log', e => {
   const event = JSON.parse(e.data), { runId, lastLine, lastOutputAt } = event;
-  const run = S?.runs.find(r => r.id === runId);
+  const run = findRun(runId);
   if (run) { if (lastLine) run.lastLine = lastLine; if (lastOutputAt) run.lastOutputAt = lastOutputAt; if (typeof event.pty === 'boolean') run.pty = event.pty; }
   for (const el of document.querySelectorAll(`[data-live="${runId}"]`)) { el.textContent = lastLine || el.textContent; el.title = lastLine || el.title; const ago = el.parentElement && el.parentElement.querySelector('[data-ago]'); if (ago && lastOutputAt) ago.dataset.ago = lastOutputAt; }
   for (const tab of TERM.tabs) if (tab.id === runId) termReceive(tab, event);
