@@ -675,6 +675,19 @@
   .devtask-actions { display: flex; gap: 12px; white-space: nowrap; }
   .devtask-duration { white-space: nowrap; }
   #devtaskIndicator { white-space: nowrap; }
+  .chip.stall-badge { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); background: color-mix(in srgb, var(--warn) 12%, var(--panel)); white-space: nowrap; }
+  .stall-notice { display: grid; justify-items: start; gap: 4px; margin-top: 5px; }
+  .stall-reason { color: var(--warn); font-size: 12px; max-width: 340px; overflow-wrap: anywhere; }
+  .devtask-actions { flex-wrap: wrap; }
+  .run-actions { display: flex; flex-wrap: wrap; gap: 8px 12px; }
+  body.system-proxy-unavailable { grid-template-rows: 52px auto minmax(0, 1fr); }
+  .system-proxy-warning { grid-column: 1 / 3; padding: 8px 18px; color: var(--bad); background: color-mix(in srgb, var(--bad) 9%, var(--panel)); border-bottom: 1px solid color-mix(in srgb, var(--bad) 50%, var(--line)); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+  .system-proxy-warning[hidden] { display: none; }
+  .term-tab .st.warn { background: var(--warn); }
+  .term-stall-reason { color: var(--warn); max-width: 220px; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+  .term-tab .stall-badge { font-size: 10px; padding: 0 6px; }
+  .term-tab .run-actions { flex-wrap: nowrap; }
+  .term-tab .run-actions button { font-size: 11px; }
   @media (max-width: 700px) { .schedule-grid { grid-template-columns: minmax(0, 1fr); } .schedule-top { max-width: 100px; overflow: hidden; text-overflow: ellipsis; } }
 </style>
 </head>
@@ -689,6 +702,7 @@
   <button id="termBtn" title="网页终端：实时查看 agent 的命令行输出"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M7 9.5l3 2.5-3 2.5M12.5 15H17"/></svg>终端<span id="termCount"></span></button>
   <span id="leaderBox" class="row small">Leader <select id="leader"></select><button id="leaderSkills" title="leader 默认带上的技能">🧩 技能</button></span>
 </header>
+<div id="systemProxyWarning" class="system-proxy-warning" role="alert" hidden></div>
 <nav id="nav">
   <button data-p="workflow"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="6" r="2.2"/><circle cx="19" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/><path d="M7.2 6h9.6M6.2 7.9l4.6 8.2M17.8 7.9l-4.6 8.2"/></svg></span>工作流</button>
   <button data-p="leader"><span class="i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 15.4 7.2 17.9l.9-5.4L4.2 8.7l5.4-.8z"/></svg></span>Leader</button>
@@ -745,7 +759,7 @@ const color = id => `var(--${id}, var(--muted))`;
 const agentName = id => (S && S.agents.find(a => a.id === id) || {}).name || id || '未分配';
 const shortKey = k => k ? k.split('-').slice(0, 2).join('.') : '—';
 const fmtDur = ms => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? `${s} 秒` : s < 3600 ? `${Math.floor(s / 60)} 分 ${s % 60} 秒` : `${Math.floor(s / 3600)} 时 ${Math.floor(s % 3600 / 60)} 分`; };
-function toast(msg, kind = 'bad') { const t = $('toast'); t.textContent = msg; t.style.background = kind === 'ok' ? 'var(--ok)' : 'var(--bad)'; t.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => t.style.display = 'none', 5000); }
+function toast(msg, kind = 'bad') { const t = $('toast'); t.textContent = msg; t.style.background = kind === 'ok' ? 'var(--ok)' : kind === 'warn' ? 'var(--warn)' : 'var(--bad)'; t.style.color = kind === 'warn' ? '#141b26' : '#fff'; t.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => t.style.display = 'none', 5000); }
 async function api(p, body) {
   const r = await fetch(p, body !== undefined ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {});
   const j = await r.json();
@@ -756,10 +770,29 @@ const q = o => '?' + new URLSearchParams(o).toString();
 const devtasks = () => Array.isArray(S?.devtasks) ? S.devtasks : [];
 const allRuns = () => [...new Map([...(S?.runs || []), ...devtasks()].map(r => [r.id, r])).values()];
 const findRun = id => devtasks().find(r => r.id === id) || S?.runs?.find(r => r.id === id);
+const runStalled = run => !!run?.stalled && run.status === 'running';
+const stallReason = run => run?.stalledReason || '疑似卡住：长时间没有有效的新输出';
+const stallBadge = run => runStalled(run) ? `<span class="chip warn stall-badge" title="${esc(stallReason(run))}">疑似卡住</span>` : '';
+const stallNotice = run => runStalled(run) ? `<div class="stall-notice" role="status">${stallBadge(run)}<span class="stall-reason">${esc(stallReason(run))}</span></div>` : '';
+function runRecoveryActions(run) {
+  if (!['queued', 'running'].includes(run?.status)) return '';
+  const disabled = run.cancelRequested ? 'disabled' : '';
+  return `<span class="run-actions"><button class="link bad" ${disabled} onclick="event.stopPropagation();cancelMonitoredRun('${jsq(run.id)}',this)">取消</button>${runStalled(run) ? `<button class="link" ${disabled} title="取消当前运行，并使用相同参数重新派发" onclick="event.stopPropagation();retryMonitoredRun('${jsq(run.id)}',this)">取消并重试</button>` : ''}</span>`;
+}
+function renderSystemProxyWarning() {
+  const warning = $('systemProxyWarning'), proxy = S?.systemProxy, unavailable = !!proxy?.unavailable;
+  if (!warning) return;
+  warning.hidden = !unavailable;
+  document.body.classList.toggle('system-proxy-unavailable', unavailable);
+  warning.textContent = unavailable ? proxy.message || `系统代理 ${proxy.endpoint || ''} 不可用，已让走中转的 agent 直连；官方账号可能连不上，需要恢复代理` : '';
+  warning.title = proxy?.checkedAt ? `最近检测：${new Date(proxy.checkedAt).toLocaleString()}` : '';
+}
 const devtaskRunningCount = () => Number(S?.devtaskRunningCount ?? devtasks().filter(r => r.status === 'running').length);
 function renderDevtaskIndicator() {
   const el = $('devtaskIndicator'); if (!el) return;
-  const count = devtaskRunningCount(); el.style.display = count ? '' : 'none'; el.textContent = count ? `面板任务 ${count}` : '';
+  const count = devtaskRunningCount(), stalled = devtasks().filter(runStalled).length; el.style.display = count ? '' : 'none'; el.textContent = count ? `面板任务 ${count}${stalled ? ` · ${stalled} 疑似卡住` : ''}` : '';
+  el.classList.toggle('warn', !!stalled); el.classList.toggle('stall-badge', !!stalled); el.classList.toggle('run', !stalled);
+  el.title = stalled ? devtasks().filter(runStalled).map(run => `${run.title || run.id}：${stallReason(run)}`).join('\n') : '查看全局面板任务';
 }
 function mergeDevtask(run, runningCount) {
   if (!S || !run?.id) return;
@@ -924,6 +957,7 @@ function renderTop() {
   renderCrew();
   renderScheduleIndicator();
   renderDevtaskIndicator();
+  renderSystemProxyWarning();
   notifyLeaderSelection();
 }
 const SKILL_ICON = document.querySelector('nav [data-p="skills"] svg').outerHTML;
@@ -2010,8 +2044,8 @@ function devtasksView() {
   const tasks = [...devtasks()].sort((a, b) => Date.parse(b.createdAt || b.startedAt || 0) - Date.parse(a.createdAt || a.startedAt || 0));
   const count = devtaskRunningCount(), queued = tasks.filter(r => r.status === 'queued').length;
   return `<section class="card devtask-section" id="devtasksSection" aria-label="面板任务"><div class="devtask-heading"><h3>面板任务</h3><span class="chip">全局</span>${count ? `<span class="chip run">${count} 运行中</span>` : ''}${queued ? `<span class="chip warn">${queued} 排队</span>` : ''}<span class="grow"></span><span class="small muted">跨项目托管的开发任务</span></div>${tasks.length ? `<div class="devtask-table-wrap"><table class="devtask-table"><thead><tr><th>任务</th><th>Agent · 模型 · effort</th><th>状态</th><th>耗时</th><th>操作</th></tr></thead><tbody>${tasks.map(run => {
-    const active = ['queued', 'running'].includes(run.status), stateClass = run.status === 'running' ? 'run' : run.status === 'queued' ? 'warn' : run.status === 'finished' ? 'ok' : ['failed', 'interrupted'].includes(run.status) ? 'bad' : '';
-    return `<tr data-devtask="${esc(run.id)}"><td><div class="devtask-title">${esc(run.title || run.id)}</div><div class="small muted" title="${esc(run.cwd || '')}">${scheduleDate(run.createdAt || run.startedAt)}</div><div class="small muted devtask-output" data-live="${esc(run.id)}" title="${esc(run.lastLine || '')}">${esc(run.lastLine || '')}</div></td><td><div style="color:${color(run.agent)}">${esc(agentName(run.agent))}</div><div class="small muted devtask-meta">${esc(run.model || '默认模型')}${run.effort ? ` · ${esc(run.effort)}${run.effortIgnored ? '（effort 已忽略）' : ''}` : ''}</div></td><td><span class="chip ${stateClass}">${esc(RUN_ST[run.status] || run.status)}</span>${run.cancelRequested && run.status === 'running' ? '<div class="small muted">正在取消…</div>' : ''}${run.exitCode !== undefined && run.exitCode !== null ? `<div class="small muted" style="margin-top:4px">退出码 ${esc(run.exitCode)}</div>` : ''}${run.error ? `<div class="small muted devtask-meta" title="${esc(run.error)}">${esc(run.error)}</div>` : ''}</td><td class="small devtask-duration">${devtaskElapsed(run)}</td><td><div class="devtask-actions"><button class="link" onclick="openTerm('${jsq(run.id)}')">终端</button><button class="link" onclick="devtaskReply('${jsq(run.id)}')">回复</button>${active ? `<button class="link bad" ${run.cancelRequested ? 'disabled' : ''} onclick="cancelDevtask('${jsq(run.id)}',this)">取消</button>` : ''}</div></td></tr>`;
+    const stateClass = run.status === 'running' ? 'run' : run.status === 'queued' ? 'warn' : run.status === 'finished' ? 'ok' : ['failed', 'interrupted'].includes(run.status) ? 'bad' : '';
+    return `<tr data-devtask="${esc(run.id)}"><td><div class="devtask-title">${esc(run.title || run.id)}</div><div class="small muted" title="${esc(run.cwd || '')}">${scheduleDate(run.createdAt || run.startedAt)}</div><div class="small muted devtask-output" data-live="${esc(run.id)}" title="${esc(run.lastLine || '')}">${esc(run.lastLine || '')}</div></td><td><div style="color:${color(run.agent)}">${esc(agentName(run.agent))}</div><div class="small muted devtask-meta">${esc(run.model || '默认模型')}${run.effort ? ` · ${esc(run.effort)}${run.effortIgnored ? '（effort 已忽略）' : ''}` : ''}</div></td><td><span class="chip ${stateClass}">${esc(RUN_ST[run.status] || run.status)}</span>${stallNotice(run)}${run.cancelRequested && run.status === 'running' ? '<div class="small muted">正在取消…</div>' : ''}${run.exitCode !== undefined && run.exitCode !== null ? `<div class="small muted" style="margin-top:4px">退出码 ${esc(run.exitCode)}</div>` : ''}${run.error ? `<div class="small muted devtask-meta" title="${esc(run.error)}">${esc(run.error)}</div>` : ''}</td><td class="small devtask-duration">${devtaskElapsed(run)}</td><td><div class="devtask-actions"><button class="link" onclick="openTerm('${jsq(run.id)}')">终端</button><button class="link" onclick="devtaskReply('${jsq(run.id)}')">回复</button>${runRecoveryActions(run)}</div></td></tr>`;
   }).join('')}</tbody></table></div>` : '<div class="component-empty">还没有面板任务。助手通过派活接口提交后，任务和执行终端会显示在这里。</div>'}</section>`;
 }
 function renderDevtasks() {
@@ -2034,6 +2068,27 @@ window.cancelDevtask = async (id, button) => {
   try { await api('/api/devtask/cancel', { id }); await refresh(); termSync(); }
   finally { if (button.isConnected) button.disabled = false; }
 };
+window.cancelMonitoredRun = async (id, button) => {
+  const run = findRun(id) || TERM.tabs.find(tab => tab.id === id)?.run;
+  if (!run) return toast('找不到这个运行');
+  if (button) button.disabled = true;
+  try {
+    await api(run.kind === 'devtask' ? '/api/devtask/cancel' : '/api/cancel', run.kind === 'devtask' ? { id } : { runId: id });
+    await refresh(); termSync();
+  } finally { if (button?.isConnected) button.disabled = false; }
+};
+window.retryMonitoredRun = async (id, button) => {
+  const run = findRun(id) || TERM.tabs.find(tab => tab.id === id)?.run;
+  if (!run) return toast('找不到这个运行');
+  if (button) button.disabled = true;
+  try {
+    const result = await api(run.kind === 'devtask' ? '/api/devtask/retry' : '/api/run/retry', { id });
+    const next = result.run || result;
+    await refresh(); termSync();
+    if (next.id) await openTerm(next.id, next);
+    toast('已取消原运行，并按相同参数重新派发', 'ok');
+  } finally { if (button?.isConnected) button.disabled = false; }
+};
 let showCancelled = false;
 window.toggleCancelled = () => { showCancelled = !showCancelled; renderPage(); };
 function runsView() {
@@ -2044,8 +2099,8 @@ function runsView() {
     <table class="list"><thead><tr><th>开始</th><th>类型</th><th>对象</th><th>Agent</th><th>耗时</th><th>状态</th><th></th></tr></thead><tbody>
     ${S.runs.filter(r => showCancelled || r.status !== 'cancelled').map(r => `<tr><td>${new Date(r.createdAt).toLocaleString()}</td><td>${KIND[r.kind] || r.kind}</td><td>${label(r)}</td>
       <td style="color:${color(r.agent)}">${esc(agentName(r.agent))}</td><td>${r.startedAt ? (r.endedAt ? fmtDur(Date.parse(r.endedAt) - Date.parse(r.startedAt)) : `<span data-since="${r.startedAt}"></span>`) : '—'}</td>
-      <td class="st-${r.status}">${RUN_ST[r.status]}${r.verdict ? ' · ' + (r.verdict === 'approve' ? '建议通过' : '建议修改') : ''}${r.error ? ' · ' + esc(r.error) : ''}</td>
-      <td><button class="link" onclick="openLog('${r.id}')">日志</button>${['queued', 'running'].includes(r.status) ? ` <button class="link" style="color:var(--bad)" onclick="cancelRun('${r.id}')">取消</button>` : ''}</td></tr>`).join('')}
+      <td class="st-${r.status}">${RUN_ST[r.status]}${r.verdict ? ' · ' + (r.verdict === 'approve' ? '建议通过' : '建议修改') : ''}${r.error ? ' · ' + esc(r.error) : ''}${stallNotice(r)}</td>
+      <td><div class="run-actions"><button class="link" onclick="openLog('${jsq(r.id)}')">日志</button>${runRecoveryActions(r)}</div></td></tr>`).join('')}
     </tbody></table></div>
     <div class="card small"><b>项目文档：</b>${S.docs.map(d => `<button class="link" style="margin-right:12px" onclick="openDoc('${jsq(d)}')">${esc(d)}</button>`).join('')}</div>`;
 }
@@ -2218,8 +2273,8 @@ function termRender() {
   $('termTabs').innerHTML = TERM.tabs.map(t => { const r = termRun(t);
     if (!termCanInput(t)) t.input = false;
     t.term.options.disableStdin = !t.input; t.term.options.cursorBlink = t.input;
-    const cls = ['running', 'queued'].includes(r.status) ? 'run' : r.status === 'finished' ? 'ok' : 'bad';
-    return `<div class="term-tab ${t.id === TERM.active ? 'on' : ''} ${t.flash ? 'flash' : ''}" data-id="${t.id}" style="--tc:${color(r.agent)}"><span class="st ${cls}"></span>${esc(termTabLabel(r))}${t.input ? '<span class="term-input-badge">输入已开启</span>' : ''}<span class="x" data-close="${t.id}">✕</span></div>`; }).join('')
+    const cls = runStalled(r) ? 'warn' : ['running', 'queued'].includes(r.status) ? 'run' : r.status === 'finished' ? 'ok' : 'bad';
+    return `<div class="term-tab ${t.id === TERM.active ? 'on' : ''} ${t.flash ? 'flash' : ''}" data-id="${esc(t.id)}" style="--tc:${color(r.agent)}"><span class="st ${cls}"></span>${esc(termTabLabel(r))}${stallBadge(r)}${runStalled(r) ? `<span class="term-stall-reason" title="${esc(stallReason(r))}">${esc(stallReason(r))}</span>${runRecoveryActions(r)}` : ''}${t.input ? '<span class="term-input-badge">输入已开启</span>' : ''}<span class="x" data-close="${esc(t.id)}">✕</span></div>`; }).join('')
     + `<div class="term-tools">${active ? `<label class="term-input ${active.input ? 'on' : ''}" title="仅正在运行的 PTY 终端允许输入"><input type="checkbox" aria-label="允许输入" onchange="termToggleInput(this.checked)" ${active.input ? 'checked' : ''} ${canInput ? '' : 'disabled'}>允许输入</label><button title="全选终端内容，然后使用 Ctrl+C 复制" onclick="termSelectAll()">复制全部</button><button onclick="termBottom()">滚到底</button>` : ''}<button title="放大 / 还原" onclick="termMax()">${TERM.max ? '▭' : '▢'}</button><button title="收起" onclick="termShow(false)">▾</button></div>`;
   for (const t of TERM.tabs) { t.el.classList.toggle('on', t.id === TERM.active); t.flash = false; }
   const a = active, r = a && termRun(a);
@@ -2257,7 +2312,8 @@ $('termTabs').ondblclick = e => { if (!e.target.closest('button, label, input, [
 function termSync() { // 状态刷新时：新开始的任务自动加标签，结束的标签闪一下
   if (!S) return;
   for (const tab of TERM.tabs) {
-    const r = termRun(tab); tab.pty = !!r.pty;
+    const r = termRun(tab); Object.assign(tab.run, r); tab.pty = !!r.pty;
+    if (!['running', 'queued'].includes(r.status)) Object.assign(tab.run, { stalled: false, stalledReason: '' });
     if (tab.status !== r.status) {
       if (['running', 'queued'].includes(tab.status) && !['running', 'queued'].includes(r.status)) { tab.flash = true; termReload(tab); }
       tab.status = r.status;
@@ -2385,7 +2441,7 @@ const PROVIDER_TYPES = { anthropic: 'Anthropic Messages', openai: 'OpenAI 兼容
 const AGENT_PROVIDER_TYPES = { claude: ['anthropic'], codex: ['openai'], gemini: ['gemini'], grok: ['openai', 'xai'], deepseek: [] };
 async function openSettings() {
   const [agents, providers] = await Promise.all([api('/api/agents'), api('/api/providers')]);
-  SETTINGS = { agents, providers, providerId: providers[0]?.id || '__new', providerDrafts: {}, agentDrafts: {}, global: { maxParallel: S.maxParallel, maxRounds: S.maxRounds, projectsRoot: S.projectsRoot } };
+  SETTINGS = { agents, providers, providerId: providers[0]?.id || '__new', providerDrafts: {}, agentDrafts: {}, global: { maxParallel: S.maxParallel, maxRounds: S.maxRounds, projectsRoot: S.projectsRoot, stallMinutes: S.stallMinutes ?? 10 } };
   renderSettings();
 }
 window.openSettings = openSettings;
@@ -2398,7 +2454,7 @@ function providerSettingsDraft() {
 }
 function captureSettings() {
   if (!SETTINGS || !$('settingsShell')) return;
-  if ($('setPar')) SETTINGS.global = { maxParallel: +$('setPar').value, maxRounds: +$('setRounds').value, projectsRoot: $('setRoot').value };
+  if ($('setPar')) SETTINGS.global = { maxParallel: +$('setPar').value, maxRounds: +$('setRounds').value, projectsRoot: $('setRoot').value, stallMinutes: +$('setStallMinutes').value };
   if ($('providerName')) Object.assign(providerSettingsDraft(), { name: $('providerName').value, type: $('providerType').value, baseUrl: $('providerUrl').value, enabled: $('providerEnabled').checked });
   for (const a of SETTINGS.agents) {
     if (!$('en-' + a.id)) continue;
@@ -2495,7 +2551,7 @@ function providerCompatibility(a, p) {
 function agentsSettingsView() {
   const g = SETTINGS.global;
   return `<p class="settings-intro">官方账号使用 CLI 自己的登录；服务商模式使用面板统一配置的地址、Key 和模型。</p><div>${SETTINGS.agents.map(settingsCard).join('')}</div>
-    <details class="settings-global"><summary>面板与任务设置</summary><div class="form"><div class="grid2"><label>同时运行的任务数<select id="setPar" title="Leader 会保证同时跑的任务不改同一批文件">${[1, 2, 3, 4, 5].map(n => `<option ${g.maxParallel === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label><label>自动模式最多打回几轮<select id="setRounds">${[1, 2, 3, 4, 5].map(n => `<option ${g.maxRounds === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div><label>新项目默认放在<input id="setRoot" value="${esc(g.projectsRoot)}"></label><div class="row"><span class="grow"></span><button onclick="saveGlobal(this)">保存面板设置</button></div></div></details>`;
+    <details class="settings-global"><summary>面板与任务设置</summary><div class="form"><div class="grid2"><label>同时运行的任务数<select id="setPar" title="Leader 会保证同时跑的任务不改同一批文件">${[1, 2, 3, 4, 5].map(n => `<option ${g.maxParallel === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label><label>自动模式最多打回几轮<select id="setRounds">${[1, 2, 3, 4, 5].map(n => `<option ${g.maxRounds === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label></div><label>卡住检测时长（分钟）<input id="setStallMinutes" type="number" min="0.01" step="any" value="${esc(g.stallMinutes ?? 10)}"><span class="small muted">持续没有新输出，或只重复同一行达到此时长后提醒；每 30 秒检查一次。</span></label><label>新项目默认放在<input id="setRoot" value="${esc(g.projectsRoot)}"></label><div class="row"><span class="grow"></span><button onclick="saveGlobal(this)">保存面板设置</button></div></div></details>`;
 }
 function loginSettingsView(a) {
   const login = a.login || {}, status = login.status;
@@ -2523,7 +2579,7 @@ window.setAgentAuth = (id, mode) => {
 window.setAgentProvider = (id, provider) => { captureSettings(); agentSettingsDraft(SETTINGS.agents.find(a => a.id === id)).auth.provider = provider; renderSettings(); };
 const testLabel = t => !t ? '' : t.status === 'running' ? '<span class="pulse">测试中…</span>' : (t.status === 'ok' ? `<span style="color:var(--ok)">✓ 通 · ${fmtDur(t.ms)}</span>` : `<span style="color:var(--bad)">✗ ${t.status === 'timeout' ? '超时' : '失败'}</span>`) + (t.finishedAt ? `<span class="muted"> · ${esc(new Date(t.finishedAt).toLocaleString())}</span>` : '') + (t.persistenceError ? `<span style="color:var(--bad)" title="${esc(t.persistenceError)}"> · 结果未保存，请重测</span>` : '');
 const agentTestOutput = t => t?.output && t.status !== 'ok' ? `<details><summary class="small">测连通输出</summary><pre class="log">${esc(t.output)}</pre></details>` : '';
-window.saveGlobal = button => settingsAction(button, async () => { captureSettings(); const g = SETTINGS.global; S = await api('/api/settings', { maxParallel: g.maxParallel, projectsRoot: g.projectsRoot.trim() }); if (S.project) S = await api('/api/mode', { maxRounds: g.maxRounds }); renderTop(); toast('面板设置已保存', 'ok'); });
+window.saveGlobal = button => settingsAction(button, async () => { captureSettings(); const g = SETTINGS.global; if (!Number.isFinite(g.stallMinutes) || g.stallMinutes <= 0) throw new Error('卡住检测时长必须大于 0 分钟'); S = await api('/api/settings', { maxParallel: g.maxParallel, projectsRoot: g.projectsRoot.trim(), stallMinutes: g.stallMinutes }); if (S.project) S = await api('/api/mode', { maxRounds: g.maxRounds }); renderTop(); toast('面板设置已保存', 'ok'); });
 async function persistAgent(id) {
   captureSettings(); const a = SETTINGS.agents.find(x => x.id === id), d = agentSettingsDraft(a);
   if (d.auth.mode === 'provider') { const p = SETTINGS.providers.find(x => x.id === d.auth.provider); if (!p) throw new Error('请选择服务商'); const why = providerCompatibility(a, p); if (why) throw new Error(why); }
@@ -2552,6 +2608,35 @@ es.addEventListener('devtask', e => {
   const event = JSON.parse(e.data);
   mergeDevtask(event.run, event.runningCount);
   renderDevtaskIndicator(); renderCrew(); renderDevtasks(); termSync();
+});
+es.addEventListener('run', e => {
+  const { run } = JSON.parse(e.data);
+  if (!run?.id) return;
+  const current = findRun(run.id);
+  if (current) Object.assign(current, run);
+  for (const tab of TERM.tabs) if (tab.id === run.id) Object.assign(tab.run, run);
+  if (current && page === 'runs') renderPage();
+  termSync();
+});
+es.addEventListener('system-proxy', e => {
+  const proxy = JSON.parse(e.data), previous = S?.systemProxy;
+  if (S) S.systemProxy = proxy;
+  renderSystemProxyWarning();
+  if (proxy.unavailable && (!previous?.unavailable || previous.endpoint !== proxy.endpoint)) toast(proxy.message || `系统代理 ${proxy.endpoint || ''} 不可用`, 'bad');
+  else if (previous?.unavailable && !proxy.unavailable) toast('系统代理已恢复可用', 'ok');
+});
+es.addEventListener('stall', e => {
+  const event = JSON.parse(e.data), current = findRun(event.id);
+  const update = { ...(event.run || {}), id: event.id, stalled: event.stalled, stalledReason: event.stalledReason || '' };
+  if (event.kind === 'devtask' || current?.kind === 'devtask') mergeDevtask(update);
+  else if (current) Object.assign(current, update);
+  for (const tab of TERM.tabs) if (tab.id === event.id) Object.assign(tab.run, update);
+  const run = findRun(event.id) || event.run;
+  renderDevtaskIndicator();
+  if (page === 'runs') renderPage();
+  termSync();
+  if (event.stalled) toast(`${run?.title || agentName(run?.agent) || event.id}：${event.stalledReason || '疑似卡住'}`, 'warn');
+  else if (run?.status === 'running') toast(`${run?.title || event.id} 已恢复输出`, 'ok');
 });
 // EventSource reconnects do not replay missed log chunks; fill from the file.
 es.addEventListener('open', () => { for (const tab of TERM.tabs) termReload(tab); if (S) refresh().then(termSync).catch(() => {}); });

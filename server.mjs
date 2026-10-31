@@ -3,6 +3,7 @@
 // - 面板数据（leader、分配、阶段、运行记录）存在 <项目>/_bmad-output/panel/state.json
 // - 每次运行的文件在 <项目>/_bmad-output/panel/runs/<runId>/
 import http from 'node:http';
+import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
@@ -23,6 +24,8 @@ const DEVTASKS_STATE = path.join(DEVTASKS_DIR, 'state.json');
 const SCHEDULER_TEST = process.env.PANEL_SCHEDULER_TEST === '1' && !!process.env.PANEL_CONFIG && Number(process.env.PORT || 4590) !== 4590;
 const RUNFIX_TEST = (process.env.PANEL_RUNFIX_TEST === '1' || SCHEDULER_TEST) && !!process.env.PANEL_CONFIG && Number(process.env.PORT || 4590) !== 4590;
 const runfixAgentFixtures = new Map();
+// Test overrides are impossible on the production port or without a separate config.
+const STALL_TEST = process.env.PANEL_STALL_TEST === '1' && !!process.env.PANEL_CONFIG && Number(process.env.PORT || 4590) !== 4590;
 const AGENTS_FILE = path.join(HERE, 'agents.json');
 const UI_CHECK = path.join(HERE, 'tools', 'ui-check.mjs').replace(/\\/g, '/');
 const SECRETS_FILE = path.join(HERE, 'secrets.env');
@@ -63,12 +66,58 @@ const isDir = f => { try { return fs.statSync(f).isDirectory(); } catch { return
 const stripAnsi = s => stripVTControlCharacters(s.replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\|$)/g, '').replace(/\x1b[P^_X][\s\S]*?(?:\x1b\\|$)/g, ''));
 const slug = s => String(s).trim().replace(/[\\/:*?"<>|\s]+/g, '-').replace(/^-+|-+$/g, '') || 'project';
 
-let config = Object.assign({ project: null, recent: [], projectsRoot: path.join(HERE, 'projects'), maxParallel: 1, maxDevtasks: 2, devtaskRoots: null }, readJson(CONFIG_FILE, {}));
+let config = Object.assign({ project: null, recent: [], projectsRoot: path.join(HERE, 'projects'), maxParallel: 1, maxDevtasks: 2, devtaskRoots: null, stallMinutes: 10 }, readJson(CONFIG_FILE, {}));
 const saveConfig = () => writeJson(CONFIG_FILE, config);
 function useProject(dir) {
   config.project = path.resolve(dir);
   config.recent = [config.project, ...config.recent.filter(p => p !== config.project && exists(p))].slice(0, 12);
   saveConfig();
+}
+
+// ---------- 系统代理健康（只读注册表，不修改系统设置） ----------
+let systemProxy = { enabled: false, unavailable: false, endpoint: '', message: '', checkedAt: null };
+let proxyCheck = null;
+function readSystemProxy() {
+  if (STALL_TEST && process.env.PANEL_PROXY_TEST_FILE) return Promise.resolve(readJson(process.env.PANEL_PROXY_TEST_FILE, { enabled: false, server: '' }));
+  if (process.platform !== 'win32') return Promise.resolve({ enabled: false, server: '' });
+  return new Promise((resolve, reject) => execFile('reg.exe', ['query', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings'], { windowsHide: true, timeout: 3000, encoding: 'utf8' }, (error, stdout) => {
+    if (error) return reject(new Error('无法读取系统代理'));
+    const enabled = stdout.match(/ProxyEnable\s+REG_DWORD\s+(0x[0-9a-f]+|\d+)/i);
+    resolve({ enabled: !!enabled && Number(enabled[1]) !== 0, server: stdout.match(/ProxyServer\s+REG_SZ\s+([^\r\n]+)/i)?.[1]?.trim() || '' });
+  }));
+}
+function proxyEndpoints(server) {
+  return [...new Map(String(server || '').split(';').map(entry => {
+    const address = entry.trim().replace(/^(?:https?|socks\d?)=/i, '');
+    if (!address) return null;
+    try { const u = new URL(address.includes('://') ? address : 'http://' + address); const port = Number(u.port || (u.protocol === 'https:' ? 443 : u.protocol.startsWith('socks') ? 1080 : 80)); return [u.host, { host: u.hostname.replace(/^\[|\]$/g, ''), port, label: u.hostname + ':' + port }]; } catch { return null; }
+  }).filter(Boolean)).values()];
+}
+function proxyConnect({ host, port }) {
+  return new Promise(resolve => {
+    let done = false, socket;
+    const finish = ok => { if (done) return; done = true; clearTimeout(timer); socket?.destroy(); resolve(ok); };
+    const timer = setTimeout(() => finish(false), 1000);
+    try { socket = net.createConnection({ host, port }); socket.once('connect', () => finish(true)); socket.once('error', () => finish(false)); } catch { finish(false); }
+  });
+}
+function refreshSystemProxy() {
+  if (proxyCheck) return proxyCheck;
+  proxyCheck = (async () => {
+    let next;
+    try {
+      const settings = await readSystemProxy(), endpoints = settings.enabled ? proxyEndpoints(settings.server) : [];
+      const results = await Promise.all(endpoints.map(proxyConnect));
+      const dead = endpoints.filter((_, i) => !results[i]);
+      const unavailable = !!settings.enabled && (!endpoints.length || !!dead.length), endpoint = (unavailable ? dead : endpoints).map(x => x.label).join('、') || (settings.enabled ? '（地址无效）' : '');
+      next = { enabled: !!settings.enabled, unavailable, endpoint, message: unavailable ? '系统代理 ' + endpoint + ' 不可用，已让走中转的 agent 直连；官方账号 agent 可能连不上，需要恢复代理' : '', checkedAt: now() };
+    } catch (e) { next = { ...systemProxy, checkedAt: now(), error: e.message }; }
+    const changed = ['enabled', 'unavailable', 'endpoint', 'message', 'error'].some(k => next[k] !== systemProxy[k]);
+    systemProxy = next;
+    if (changed) broadcast('system-proxy', systemProxy);
+    return systemProxy;
+  })().finally(() => { proxyCheck = null; });
+  return proxyCheck;
 }
 
 // ---------- agent 配置 / 认证与服务商 ----------
@@ -217,6 +266,11 @@ function invocationEnv(a, perm = {}) {
   const managed = new Set([...MANAGED_AUTH_ENV, ...readProvidersFile().providers.map(p => p.keyEnv)].map(k => k.toUpperCase()));
   // Windows environment names are case-insensitive, including inherited names.
   for (const k of Object.keys(env)) if (managed.has(k.toUpperCase())) delete env[k];
+  // Preserve saved overrides; only provider-mode launches get a temporary bypass.
+  if (systemProxy.unavailable && authFor(a).mode === 'provider') {
+    for (const k of Object.keys(env)) if (k.toUpperCase() === 'NO_PROXY') delete env[k];
+    env.NO_PROXY = '*'; env.no_proxy = '*';
+  }
   return env;
 }
 function buildInvocation(a, prompt, cwd, { authDir } = {}) {
@@ -400,7 +454,7 @@ const skillsBase = p => exists(path.join(p.root, '.claude', 'skills')) ? '.claud
 
 function snapshot(project = config.project) {
   const agents = loadAgents().map(({ resolved, ...a }) => ({ id: a.id, name: a.name, available: a.available, availability: agentAvailability(a), installed: a.installed, enabled: a.enabled !== false, strengths: a.strengths, permission: a.permission, effectiveModel: a.effectiveModel, relay: a.relay, auth: a.auth, authError: a.authError }));
-  if (!project || !exists(project)) return { project: null, recent: config.recent.filter(exists), projectsRoot: config.projectsRoot, agents, maxParallel: config.maxParallel, scheduleRunningCount: scheduleRunningCount(), ...devtaskSnapshot() };
+  if (!project || !exists(project)) return { project: null, recent: config.recent.filter(exists), projectsRoot: config.projectsRoot, agents, maxParallel: config.maxParallel, scheduleRunningCount: scheduleRunningCount(), ...devtaskSnapshot(), systemProxy, stallMinutes: stallMinutes() };
   const p = P(project), parsed = parseEpics(p.epics), sprint = readSprint(p.sprint), st = loadState(p);
   const stories = parsed.stories.map(s => {
     const key = Object.keys(sprint).find(k => k.startsWith(`${s.epic}-${s.n}-`)) || `${s.epic}-${s.n}`;
@@ -410,7 +464,7 @@ function snapshot(project = config.project) {
   for (const f of walk(p.planning, new Set(['panel']))) if (f.endsWith('.md')) docs.push(path.relative(p.root, f).replace(/\\/g, '/'));
   for (const f of ['AGENTS.md', 'docs/embedded-standards.md']) if (exists(path.join(p.root, f))) docs.unshift(f);
   return {
-    project: p.root, projectName: path.basename(p.root), recent: config.recent.filter(exists), projectsRoot: config.projectsRoot, scheduleRunningCount: scheduleRunningCount(), ...devtaskSnapshot(),
+    project: p.root, projectName: path.basename(p.root), recent: config.recent.filter(exists), projectsRoot: config.projectsRoot, scheduleRunningCount: scheduleRunningCount(), ...devtaskSnapshot(), systemProxy, stallMinutes: stallMinutes(),
     bmadInstalled: exists(path.join(p.root, '_bmad')), hasEpics: exists(p.epics), hasSprint: exists(p.sprint), maxParallel: config.maxParallel,
     orchestration: st.orchestration, fixedRecipe: !!st.fixedRecipe, components: componentCalls(p, st), componentCalls: componentCalls(p, st), requirementChanged: st.requirementChanged || null, runNotice: st.runNotice || null,
     ...triageSnapshot(p, st), agents, epics: parsed.epics, stories, leader: st.leader, leaderSkills: st.leaderSkills || [], acceptance: st.acceptance || {}, mode: st.mode || 'manual', maxRounds: st.maxRounds || 2, acceptLevel: acceptLevel(st), leaderBoard: (() => { const L = st.leaderBoard || {}; return { notes: L.notes || '', progress: L.progress || null, ask: L.ask || null, finished: L.finished || null, error: L.error || null, ticks: L.ticks || 0, lastTickAt: L.lastTickAt || null, log: (L.log || []).slice(-30).reverse(), answers: L.answers || [] }; })(), autoRounds: st.autoRounds || {}, storySkills: (() => { const out = {}, pl = readPlan(p); for (const x of (pl && pl.assignments) || []) if (x.skills && x.skills.length) out[fullStoryKey(p, x.key)] = [...x.skills]; for (const [k, v] of Object.entries(st.leaderInstr || {})) if (v.skills && v.skills.length) out[k] = [...new Set([...(out[k] || []), ...v.skills])]; return out; })(), storyAutoSkills: Object.fromEntries(Object.entries(st.leaderInstr || {}).map(([k, v]) => [k, v.autoSkills || []])), plan: readPlan(p), stages: stageInfo(p, st),
@@ -613,6 +667,67 @@ const running = new Map(); // runId -> child
 const live = new Map();    // runId -> 最近一句进度
 const tails = new Map();   // runId -> 最近一段输出
 const lastOut = new Map(); // runId -> 最后输出时间
+// Separate from status previews: every raw output line counts, including tool output.
+const stallWatches = new Map(); // also records the project when the user switches projects
+const retryJobs = new Map();
+// Retain routing for queued and completed tabs after switching the active project.
+const runProjects = new Map();
+const stallMinutes = () => Number.isFinite(Number(config.stallMinutes)) && Number(config.stallMinutes) > 0 ? Number(config.stallMinutes) : 10;
+function watchRun(run, project = null) {
+  if (project) runProjects.set(run.id, project);
+  stallWatches.set(run.id, { run, project, lastActivity: Date.now(), sameSince: Date.now(), line: null, count: 0, pending: '', pendingChangedAt: 0, escape: '' });
+}
+function feedStall(id, text) {
+  const w = stallWatches.get(id); if (!w) return;
+  let visible = '';
+  for (const ch of text) {
+    if (w.escape === 'esc') { w.escape = ch === '[' ? 'csi' : ch === ']' ? 'osc' : 'P^_X'.includes(ch) ? 'string' : ''; continue; }
+    if (w.escape === 'csi') { if (ch >= '@' && ch <= '~') w.escape = ''; continue; }
+    if (w.escape === 'osc' || w.escape === 'string') { if (ch === '\x07' || ch === '\x9c') w.escape = ''; else if (ch === '\x1b') w.escape += '-esc'; continue; }
+    if (w.escape.endsWith('-esc')) { w.escape = ch === '\\' ? '' : w.escape.slice(0, -4); continue; }
+    if (ch === '\x1b') { w.escape = 'esc'; continue; }
+    if (ch === '\x9b') { w.escape = 'csi'; continue; }
+    if (ch >= ' ' || ch === '\r' || ch === '\n' || ch === '\t') visible += ch;
+  }
+  if (!visible) return;
+  const at = Date.now();
+  if (visible.trim()) w.lastActivity = at;
+  const lines = (w.pending + visible).split(/[\r\n]/); w.pending = lines.pop();
+  for (const raw of lines) {
+    const line = raw.trim().replace(/\s+/g, ' '); if (!line) continue;
+    if (line !== w.line) { w.line = line; w.count = 1; w.sameSince = at; }
+    else w.count++;
+  }
+  // An unfinished, growing line is progress too, without treating chunk boundaries as lines.
+  if (w.pending.trim()) w.pendingChangedAt = at;
+  if (w.pending.length > 16384) { w.pending = w.pending.slice(-8192); w.sameSince = at; w.count = 0; }
+  if (w.run.stalled) inspectStall(id, at);
+}
+function inspectStall(id, at = Date.now()) {
+  const w = stallWatches.get(id); if (!w) return;
+  const run = w.project ? loadState(P(w.project)).runs.find(r => r.id === id) : w.run;
+  if (!run || run.status !== 'running' || run.cancelRequested) return;
+  const minutes = stallMinutes(), windowMs = minutes * 60000;
+  const silent = at - w.lastActivity >= windowMs;
+  const unfinishedProgress = !!w.pending.trim() && w.pending.trim() !== w.line && !w.line?.startsWith(w.pending.trim()) && at - w.pendingChangedAt < windowMs;
+  const repeated = w.count >= 2 && at - w.sameSince >= windowMs && !unfinishedProgress;
+  const stalled = silent || repeated;
+  const stalledReason = stalled ? repeated ? '疑似卡住：' + minutes + ' 分钟只有「' + String(w.line).slice(0, 160) + '」' : '疑似卡住：' + minutes + ' 分钟没有新输出' : '';
+  if (!!run.stalled === stalled && (run.stalledReason || '') === stalledReason) return;
+  const patch = { stalled, stalledReason };
+  Object.assign(w.run, patch);
+  if (w.project) updateRun(P(w.project), id, patch); else { Object.assign(run, patch); persistDevtasks(); devtaskEvent(stalled ? 'stalled' : 'resumed', run); }
+  broadcast('stall', { id, kind: run.kind, project: w.project, ...patch, run: { ...run, ...patch } });
+  if (w.project) broadcast('state', {});
+}
+function checkStalledRuns() { for (const id of stallWatches.keys()) { try { inspectStall(id); } catch (e) { console.error('stall check:', id, e.message); } } }
+function waitForRunExit(id, registry) {
+  return new Promise((resolve, reject) => {
+    const deadline = Date.now() + 15000;
+    const poll = () => { if (!registry.has(id)) return resolve(); if (Date.now() >= deadline) return reject(new Error('旧进程尚未退出，请稍后重试')); setTimeout(poll, 50); };
+    poll();
+  });
+}
 // 按 agent 输出里的标记解析当前在干什么：
 // Codex：独立一行的 codex（后面是它说的话）/ exec（下一行是命令，再后面是 succeeded/exited 和命令输出）
 // Grok / DeepSeek：不换行的叙述，按句子取最后一句完整的话
@@ -772,9 +887,9 @@ function launch({ exe, args, env, stream }, cwd, logFile, onChunk, onExit, label
   }
 }
 function newRunId(kind, who) { return `${new Date().toISOString().replace(/[-:T.Z]/g, '')}-${kind}-${who}-${Math.random().toString(36).slice(2, 6)}`; }
-function updateRun(p, id, patch) { const st = loadState(p); const r = st.runs.find(x => x.id === id); if (r) Object.assign(r, patch); saveState(p, st); return r; }
+function updateRun(p, id, patch) { const st = loadState(p); const r = st.runs.find(x => x.id === id); if (r) Object.assign(r, patch); saveState(p, st); if (r) broadcast('run', { project: p.root, run: r }); return r; }
 
-function enqueue({ project = config.project, kind, storyKey = null, stage = null, nodeId = null, agentId, feedback = null, title = null, instructions = null, skills = null, relatedStory = null, callId = null, variant = null, bootstrap = false }) {
+function enqueue({ project = config.project, kind, storyKey = null, stage = null, nodeId = null, agentId, feedback = null, title = null, instructions = null, skills = null, relatedStory = null, callId = null, variant = null, bootstrap = false, retrySource = null }) {
   const p = P(project), st = loadState(p), snap = snapshot(project);
   if (st.requirementChanged) throw new Error('需求已修改，请先选择用新需求新建项目或在本项目重跑');
   if (kind !== 'triage') { rememberWorkflowRequirement(p, st); st.wf.substantiveStartedAt ||= now(); }
@@ -796,9 +911,11 @@ function enqueue({ project = config.project, kind, storyKey = null, stage = null
     c.runId = run.id; c.runIds ||= []; c.runIds.push(run.id);
   }
   if (kind === 'triage') { run.triageInput = st.triagePending.input; st.triagePending.runId = run.id; }
+  Object.assign(run, { model: retrySource?.model ?? run.model ?? agent.effectiveModel, stalled: false, stalledReason: '', retryInput: { kind, storyKey, stage, nodeId, agentId, feedback, title, instructions, skills, relatedStory, callId, variant, bootstrap } });
+  if (retrySource) run.retryOf = retrySource.id;
   const f = runFiles(p, run); fs.mkdirSync(f.dir, { recursive: true });
   const lastImpl = storyKey && [...st.runs].reverse().find(r => r.storyKey === storyKey && r.kind === 'implement');
-  const task = bootstrap ? `# 按需准备 BMAD 技能\n项目根目录：${p.root}\n组件或固定模板首次缺少所需技能时安装 BMAD ${BMAD_VERSION}，由面板执行，不占用额外流程节点。` : kind === 'component' ? componentTask(p, callId, f.result, agentId, variant) : kind === 'triage' ? triageTask(p, f.result) : kind === 'plan' ? leaderPlanTask(p, snap, f.result)
+  const task = retrySource ? readMd(runFiles(p, retrySource).task).replaceAll(runFiles(p, retrySource).dir, f.dir) : bootstrap ? `# 按需准备 BMAD 技能\n项目根目录：${p.root}\n组件或固定模板首次缺少所需技能时安装 BMAD ${BMAD_VERSION}，由面板执行，不占用额外流程节点。` : kind === 'component' ? componentTask(p, callId, f.result, agentId, variant) : kind === 'triage' ? triageTask(p, f.result) : kind === 'plan' ? leaderPlanTask(p, snap, f.result)
     : kind === 'review' ? leaderReviewTask(p, story, lastImpl, f.result)
       : kind === 'stage' ? stageTask(p, stage, st, f.result, feedback)
         : kind === 'node' ? nodeTask(p, nodeId, st, f.result, feedback)
@@ -807,11 +924,12 @@ function enqueue({ project = config.project, kind, storyKey = null, stage = null
               : kind === 'task' ? taskTask(p, title, instructions, skills, f.result, relatedStory)
         : memberTask(p, story, f.result);
   // 所有任务（包括 Leader 简报/评审）都在此写入，统一带上编码规则。
-  writeMd(f.task, `${requirementRevisionPrompt(st)}${task}\n## 通用规则（文本编码）\n${TEXT_ENCODING_RULE}\n`);
+  writeMd(f.task, retrySource ? task : `${requirementRevisionPrompt(st)}${task}\n## 通用规则（文本编码）\n${TEXT_ENCODING_RULE}\n`);
   st.runs.push(run);
   if (kind === 'node') { st.wf = st.wf || { nodes: {} }; st.wf.nodes[nodeId] = { ...(st.wf.nodes[nodeId] || {}), status: 'running', runId: run.id, agent: agentId, feedback: feedback || null }; }
   if (kind === 'stage') st.stages[stage] = { ...(st.stages[stage] || {}), status: 'running', agent: agentId, runId: run.id, feedback: feedback || null };
   saveState(p, st);
+  runProjects.set(run.id, p.root);
   queue.push({ runId: run.id, project: p.root }); broadcast('state', {}); pump();
   return run;
 }
@@ -826,7 +944,9 @@ function pump() {
     if (!run || run.status !== 'queued') continue;
     const agent = loadAgents().find(a => a.id === run.agent);
     const f = runFiles(p, run);
-    updateRun(p, runId, { status: 'running', startedAt: now() });
+    Object.assign(run, { status: 'running', startedAt: now(), stalled: false, stalledReason: '' });
+    updateRun(p, runId, run);
+    watchRun(run, p.root);
     if (run.kind === 'component') { const s2 = loadState(p), c = s2.components.find(x => x.id === run.callId); if (c) { c.status = 'running'; c.startedAt ||= now(); saveState(p, s2); } }
     if (run.kind === 'implement') {
       try { setStoryStatus(p, run.storyKey, 'in-progress'); } catch (e) { console.error(e.message); }
@@ -837,13 +957,18 @@ function pump() {
     const leaderRun = run.agent === st.leader && ['tick', 'triage', 'plan', 'review', 'nodereview'].includes(run.kind);
     const onChunk = (text, meta) => {
       if (leaderRun) leaderOutput = (leaderOutput + stripAnsi(text)).slice(-12000);
+      feedStall(runId, text);
       feedStatus(runId, text);
       lastOut.set(runId, now());
       broadcast('log', { runId, text, ...meta, lastLine: live.get(runId), lastOutputAt: lastOut.get(runId) });
     };
     const onExit = code => {
       clearTimeout(triageTimers.get(runId)); triageTimers.delete(runId);
-      running.delete(runId);
+      running.delete(runId); stallWatches.delete(runId);
+      if (loadState(p).runs.find(r => r.id === runId)?.retryRequested) {
+        updateRun(p, runId, { status: 'cancelled', endedAt: now(), exitCode: code, stalled: false, stalledReason: '', lastLine: live.get(runId) });
+        live.delete(runId); parsers.delete(runId); lastOut.delete(runId); broadcast('state', {}); pump(); return;
+      }
       if (run.bootstrap) {
         skillCache.at = 0; const c = loadState(p).components.find(x => x.id === run.callId), node = run.kind === 'node' && readWorkflow(p).nodes.find(n => n.id === run.nodeId);
         const missing = node ? missingPresetSkills(p, node) : c ? missingComponentSkills(p, c) : ['没有找到待准备的组件 / 节点'];
@@ -851,7 +976,7 @@ function pump() {
       }
       const result = readAgentResult(p, run);
       const cur = loadState(p).runs.find(r => r.id === runId) || {};
-      const patch = { status: code === 0 && result ? 'finished' : 'failed', exitCode: code, endedAt: now(), hasResult: !!result, encodingBroken: hasBrokenEncoding(result), lastLine: live.get(runId) };
+      const patch = { stalled: false, stalledReason: '', status: code === 0 && result ? 'finished' : 'failed', exitCode: code, endedAt: now(), hasResult: !!result, encodingBroken: hasBrokenEncoding(result), lastLine: live.get(runId) };
       if (cur.triageTimedOut) { patch.status = 'failed'; patch.error = cur.error; }
       if (run.kind === 'implement') {
         const before = readJson(path.join(f.dir, 'before.json'), {}), after = takeSnapshot(p.root);
@@ -907,7 +1032,7 @@ function pump() {
       broadcast('state', {}); pump();
     };
     try {
-      const child = launch(runfixInvocation(agent) || (run.bootstrap ? bmadInvocation(p.root) : buildInvocation(agent, prompt, p.root, process.env.PANEL_CONFIG ? { authDir: path.join(f.dir, 'auth') } : {})), p.root, f.log, onChunk, onExit, run.bootstrap ? 'BMAD 技能准备' : agent.name);
+      const child = launch(runfixInvocation(agent) || (run.bootstrap ? bmadInvocation(p.root) : buildInvocation({ ...agent, auth: { ...agent.auth, model: run.model ?? agent.effectiveModel } }, prompt, p.root, process.env.PANEL_CONFIG ? { authDir: path.join(f.dir, 'auth') } : {})), p.root, f.log, onChunk, onExit, run.bootstrap ? 'BMAD 技能准备' : agent.name);
       running.set(runId, child);
       updateRun(p, runId, { pty: child.pty });
       if (run.kind === 'triage') triageTimers.set(runId, setTimeout(() => {
@@ -934,13 +1059,14 @@ function activePty(id) {
     if (devtask.status !== 'running' || devtask.cancelRequested || !child?.pty) throw new Error('这个运行没有正在进行的 PTY');
     return child;
   }
-  const run = loadState(needProject()).runs.find(r => r.id === id), child = running.get(id);
+  const run = loadState(P(stallWatches.get(id)?.project || runProjects.get(id) || needProject().root)).runs.find(r => r.id === id), child = running.get(id);
   if (!run || run.status !== 'running' || run.cancelRequested || !child?.pty) throw new Error('这个运行没有正在进行的 PTY');
   return child;
 }
-function cancel(runId, p = P(config.project), withinComponent = false) {
+function cancel(runId, p = P(stallWatches.get(runId)?.project || runProjects.get(runId) || config.project), withinComponent = false) {
   const st = loadState(p);
   const rec = st.runs.find(r => r.id === runId);
+  if (!rec) throw new Error("没有这个运行");
   if (rec?.kind === 'component' && !withinComponent) return cancelComponentCall(p, rec.callId, '已手动取消');
   if (st.triagePending?.runId === runId) { delete st.triagePending; if (st.wf) st.wf.running = false; saveState(p, st); }
   queue = queue.filter(q => q.runId !== runId);
@@ -952,6 +1078,38 @@ function cancel(runId, p = P(config.project), withinComponent = false) {
     if (r && r.kind === 'stage') { const st = loadState(p); st.stages[r.stage] = { ...(st.stages[r.stage] || {}), status: 'failed' }; saveState(p, st); }
   }
   broadcast('state', {});
+}
+
+async function retryRun(id) {
+  if (retryJobs.has(id)) return retryJobs.get(id);
+  let retryProject;
+  const job = (async () => {
+    const project = stallWatches.get(id)?.project || runProjects.get(id) || config.project; retryProject = project;
+    if (!project) throw new Error('先打开任务所属项目');
+    const p = P(project), st = loadState(p), old = st.runs.find(r => r.id === id);
+    if (!old) throw new Error('没有这个运行');
+    if (old.retriedAs) return st.runs.find(r => r.id === old.retriedAs);
+    if (st.requirementChanged) throw new Error('需求已修改，请先处理新需求');
+    if (!exists(runFiles(p, old).task)) throw new Error('原任务文件不存在，无法原样重试');
+    const agent = loadAgents().find(a => a.id === old.agent);
+    if (!agent?.available) throw new Error('原 agent 当前不可用');
+    const pending = st.triagePending && { ...st.triagePending }, wasRunning = st.wf?.running;
+    updateRun(p, id, { retryRequested: true });
+    if (['queued', 'running'].includes(old.status)) cancel(id, p, true);
+    await waitForRunExit(id, running);
+    const current = loadState(p);
+    if (old.kind === 'triage') { current.triagePending = pending || { input: old.triageInput }; current.wf ||= { nodes: {} }; current.wf.running = wasRunning; }
+    if (old.kind === 'component') {
+      const c = current.components.find(x => x.id === old.callId); if (!c) throw new Error('原组件调用已删除');
+      c.status = 'queued'; c.endedAt = null; c.error = null; c.runIds = (c.runIds || []).filter(x => x !== id);
+    }
+    saveState(p, current);
+    const next = enqueue({ ...(old.retryInput || { kind: old.kind, storyKey: old.storyKey, stage: old.stage, nodeId: old.nodeId, agentId: old.agent, title: old.title, relatedStory: old.relatedStory, callId: old.callId, variant: old.variant, bootstrap: old.bootstrap }), project, retrySource: old });
+    updateRun(p, id, { retriedAs: next.id });
+    return next;
+  })();
+  retryJobs.set(id, job);
+  try { return await job; } finally { retryJobs.delete(id); if (retryProject) { const p = P(retryProject); if (loadState(p).runs.some(r => r.id === id)) updateRun(p, id, { retryRequested: false }); } }
 }
 
 // ---------- 面板任务：独立于项目、工作流和定时任务的运行队列 ----------
@@ -978,7 +1136,7 @@ function devtaskMessage(run) {
 }
 function readTextPrefix(buf, count) { return new StringDecoder('utf8').write(buf).replace(/^\uFEFF+/, '').slice(0, count); }
 function publicDevtask(run) {
-  return { ...run, lastLine: live.get(run.id) || run.lastLine || '', lastOutputAt: lastOut.get(run.id) || run.lastOutputAt || null, lastMessage: devtaskMessage(run) };
+  return { ...run, stalled: !!run.stalled, stalledReason: run.stalledReason || '', lastLine: live.get(run.id) || run.lastLine || '', lastOutputAt: lastOut.get(run.id) || run.lastOutputAt || null, lastMessage: devtaskMessage(run) };
 }
 function getDevtask(id) {
   const run = devtaskData.runs.find(r => r.id === id);
@@ -1008,7 +1166,7 @@ function devtaskCwd(cwd) {
   if (!allowed) throw new Error('cwd 不在允许的 devtaskRoots 根目录内');
   return actual;
 }
-function enqueueDevtask(input) {
+function enqueueDevtask(input, retrySource = null) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('参数必须是对象');
   const fields = new Set(['title', 'agent', 'cwd', 'prompt', 'effort', 'model']);
   if (Object.keys(input).some(k => !fields.has(k))) throw new Error('只接受 title、agent、cwd、prompt、effort、model，不接受命令行参数');
@@ -1022,10 +1180,11 @@ function enqueueDevtask(input) {
   if (model !== undefined && !agent.modelFlag && !['codex', 'grok'].includes(agentId)) throw new Error('这个 agent 没有配置 modelFlag，无法覆盖模型');
   validateProvider(agent, { ...agent.auth, ...(model !== undefined ? { model } : {}) });
   const cwd = devtaskCwd(input.cwd);
-  const run = { id: newRunId('devtask', agentId), kind: 'devtask', title: title.trim(), agent: agentId, model: model ?? agent.effectiveModel ?? '', modelOverride: model !== undefined, effort: effort ?? null, cwd, status: 'queued', pty: false, createdAt: now(), startedAt: null, endedAt: null, exitCode: null, lastLine: '' };
+  const run = { stalled: false, stalledReason: '', id: newRunId('devtask', agentId), kind: 'devtask', title: title.trim(), agent: agentId, model: retrySource?.model ?? model ?? agent.effectiveModel ?? '', modelOverride: retrySource ? !!retrySource.modelOverride : model !== undefined, effort: effort ?? null, cwd, status: 'queued', pty: false, createdAt: now(), startedAt: null, endedAt: null, exitCode: null, lastLine: '' };
   if (effort !== undefined && agentId !== 'codex') { run.effortIgnored = true; run.notes = ['effort 仅适用于 Codex，本次已忽略']; }
   const f = devtaskFiles(run); fs.mkdirSync(f.dir, { recursive: true });
   const replyInstruction = agentId === 'codex' ? '' : `\n\n## 面板最终回复\n完成后请将最终回复同时写入 ${f.last}（UTF-8 文本），供面板的回复按钮读取。该文件是本任务的交付产物，允许写入；其余改动遵循上面的任务范围。\n`;
+  fs.writeFileSync(path.join(f.dir, 'prompt.txt'), prompt, 'utf8');
   writeMd(f.task, prompt + replyInstruction);
   devtaskData.runs.push(run);
   try { persistDevtasks(); } catch (e) { devtaskData.runs.pop(); throw e; }
@@ -1041,6 +1200,7 @@ function pumpDevtasks() {
     const f = devtaskFiles(run);
     let completed = false;
     const onChunk = (text, meta) => {
+      feedStall(run.id, text);
       feedStatus(run.id, text); lastOut.set(run.id, now());
       const lines = stripAnsi(text).split(/[\r\n]+/).map(s => s.trim()).filter(Boolean);
       run.lastLine = live.get(run.id) || lines.at(-1)?.slice(0, 300) || run.lastLine;
@@ -1052,8 +1212,8 @@ function pumpDevtasks() {
       if (completed) return;
       completed = true;
       clearTimeout(devtaskPersistTimers.get(run.id)); devtaskPersistTimers.delete(run.id);
-      devtaskRunning.delete(run.id);
-      Object.assign(run, { status: run.cancelRequested ? 'cancelled' : code === 0 ? 'finished' : 'failed', exitCode: code, endedAt: now(), lastLine: live.get(run.id) || run.lastLine });
+      devtaskRunning.delete(run.id); stallWatches.delete(run.id);
+      Object.assign(run, { stalled: false, stalledReason: '', status: run.cancelRequested ? 'cancelled' : code === 0 ? 'finished' : 'failed', exitCode: code, endedAt: now(), lastLine: live.get(run.id) || run.lastLine });
       if (run.status === 'failed') run.error ||= `退出码 ${code}`;
       live.delete(run.id); parsers.delete(run.id); lastOut.delete(run.id);
       persistDevtasks(); devtaskEvent('finished', run); setImmediate(pumpDevtasks);
@@ -1062,12 +1222,14 @@ function pumpDevtasks() {
       const cwd = devtaskCwd(run.cwd), agent = loadAgents().find(a => a.id === run.agent);
       if (!agent?.installed || agent.enabled === false) throw new Error('Agent 已停用或不可用');
       const selected = { ...agent, auth: { ...agent.auth, model: run.model } };
-      const invocation = buildInvocation(selected, `读 ${f.task} 按要求完成任务`, cwd, { authDir: f.auth });
-      if (run.agent === 'codex') {
+      const fixtureInvocation = runfixInvocation(selected);
+      const invocation = fixtureInvocation || buildInvocation(selected, `读 ${f.task} 按要求完成任务`, cwd, { authDir: f.auth });
+      if (run.agent === 'codex' && !fixtureInvocation) {
         if (run.effort) invocation.args.push('-c', `model_reasoning_effort="${run.effort}"`);
         invocation.args.push('-o', f.last);
       }
       Object.assign(run, { status: 'running', startedAt: now() }); persistDevtasks();
+      watchRun(run);
       const child = launch(invocation, cwd, f.log, onChunk, onExit, agent.name);
       devtaskRunning.set(run.id, child); run.pty = child.pty;
       persistDevtasks(); devtaskEvent('started', run);
@@ -1083,10 +1245,33 @@ function cancelDevtask(id) {
   else { Object.assign(run, { status: 'cancelled', endedAt: now() }); persistDevtasks(); devtaskEvent('cancelled', run); setImmediate(pumpDevtasks); }
   return publicDevtask(run);
 }
+async function retryDevtask(id) {
+  if (retryJobs.has(id)) return retryJobs.get(id);
+  const job = (async () => {
+    const old = getDevtask(id);
+    if (old.retriedAs) return publicDevtask(getDevtask(old.retriedAs));
+    const f = devtaskFiles(old), saved = path.join(f.dir, 'prompt.txt');
+    let prompt = exists(saved) ? fs.readFileSync(saved, 'utf8') : readMd(f.task);
+    if (!exists(saved) && old.agent !== 'codex') {
+      const suffix = '\n\n## 面板最终回复\n完成后请将最终回复同时写入 ' + f.last + '（UTF-8 文本），供面板的回复按钮读取。该文件是本任务的交付产物，允许写入；其余改动遵循上面的任务范围。\n';
+      if (prompt.endsWith(suffix)) prompt = prompt.slice(0, -suffix.length);
+    }
+    const selected = loadAgents().find(a => a.id === old.agent);
+    if (!selected?.installed || selected.enabled === false) throw new Error('原 agent 当前不可用');
+    validateProvider(selected, { ...selected.auth, model: old.model }); devtaskCwd(old.cwd);
+    cancelDevtask(id);
+    await waitForRunExit(id, devtaskRunning);
+    const next = enqueueDevtask({ title: old.title, agent: old.agent, cwd: old.cwd, prompt, ...(old.effort ? { effort: old.effort } : {}), ...(old.modelOverride && old.model ? { model: old.model } : {}) }, old);
+    old.retriedAs = next.id; getDevtask(next.id).retryOf = id; persistDevtasks();
+    return publicDevtask(getDevtask(next.id));
+  })();
+  retryJobs.set(id, job);
+  try { return await job; } finally { retryJobs.delete(id); }
+}
 function recoverDevtasks() {
   let changed = false;
   for (const run of devtaskData.runs) if (run.status === 'running') {
-    Object.assign(run, { status: 'interrupted', endedAt: now(), error: '面板重启，运行中断' }); changed = true;
+    Object.assign(run, { stalled: false, stalledReason: '', status: 'interrupted', endedAt: now(), error: '面板重启，运行中断' }); changed = true;
   }
   if (changed) persistDevtasks();
   setImmediate(pumpDevtasks);
@@ -1314,8 +1499,8 @@ function recordLeaderAuthFailure(a, output) {
 function runfixInvocation(a) {
   const fixture = RUNFIX_TEST && runfixAgentFixtures.get(a.id);
   if (!fixture) return null;
-  const script = fixture.execution === 'auth-failure' ? "console.error('Not logged in · Please run /login'); process.exit(1);" : "console.log('Runfix fixture is waiting.'); setInterval(() => {}, 1000);";
-  return { exe: process.execPath, args: ['-e', script], env: { ...process.env }, stream: null };
+  const script = fixture.execution === 'repeat' ? "setInterval(() => console.log('Reconnecting... waiting for network'), 150);" : fixture.execution === 'progress' ? "let n=0; setInterval(() => console.log('Progress ' + ++n), 150);" : fixture.execution === 'auth-failure' ? "console.error('Not logged in · Please run /login'); process.exit(1);" : "console.log('Runfix fixture is waiting.'); setInterval(() => {}, 1000);";
+  return { exe: process.execPath, args: ['-e', script], env: invocationEnv(a), stream: null };
 }
 function setRunfixAgentFixture({ id, status = 'available', execution = 'hold', reset = false }) {
   if (!RUNFIX_TEST) throw new Error('Agent 测试钩子仅在隔离测试实例启用');
@@ -1324,7 +1509,7 @@ function setRunfixAgentFixture({ id, status = 'available', execution = 'hold', r
   if (reset) { runfixAgentFixtures.delete(id); runtimeAuthFailures.delete(agentTestScope(agent)); }
   else {
     if (!['available', 'expired', 'unverified', 'missing', 'disabled'].includes(status)) throw new Error('测试状态无效');
-    if (!['hold', 'auth-failure'].includes(execution)) throw new Error('测试执行方式无效');
+    if (!['hold', 'auth-failure', 'repeat', 'progress'].includes(execution)) throw new Error('测试执行方式无效');
     runtimeAuthFailures.delete(agentTestScope(agent)); runfixAgentFixtures.set(id, { status, execution });
   }
   broadcast('state', {}); return loadAgents().map(agentDetail);
@@ -1763,6 +1948,7 @@ ${commonRules(p)}
 function finishComponentRun(p, run, result, patch) {
   const st = loadState(p), c = st.components.find(x => x.id === run.callId); if (!c) return;
   if (['failed', 'cancelled'].includes(c.status)) return;
+  if (st.runs.some(r => r.callId === c.id && r.retryRequested && !r.retriedAs)) return;
   if (patch.status === 'cancelled') { c.status = 'cancelled'; c.endedAt = now(); c.error = '已取消'; saveState(p, st); return; }
   const ok = patch.status === 'finished' && componentResultValid(result) && !hasBrokenEncoding(result) && result.pass !== false;
   if (run.bootstrap && ok) {
@@ -3099,6 +3285,10 @@ const routes = {
   'GET /api/devtask/reply': ({ id }) => { const f = devtaskFiles(getDevtask(id)).last; return { text: exists(f) ? readMd(f) : '' }; },
   'GET /api/devtasks': () => listDevtasks(),
   'POST /api/devtask/cancel': ({ id }) => cancelDevtask(id),
+  'POST /api/devtask/retry': ({ id }) => retryDevtask(id),
+  'POST /api/run/retry': ({ id }) => retryRun(id),
+  'POST /api/test/stall': () => { if (!STALL_TEST) throw new Error('仅在隔离测试实例启用'); checkStalledRuns(); return snapshot(); },
+  'POST /api/test/system-proxy': () => { if (!STALL_TEST) throw new Error('仅在隔离测试实例启用'); return refreshSystemProxy(); },
   'GET /api/workflows/saved': () => listSavedWorkflows(),
   'GET /api/workflows/templates': () => listTemplates(),
   'POST /api/workflows/saved/save': ({ name, desc, fit }) => {
@@ -3245,7 +3435,8 @@ const routes = {
   'POST /api/project/setup': ({ path: dir, template }) => { if (!isDir(dir)) throw new Error('目录不存在'); return setupProject(path.resolve(dir), template === 'generic' ? 'generic' : 'embedded', false); },
   'GET /api/setup': ({ dir }) => { const j = setupJobs.get(dir); if (!j) return { status: 'none' }; return { ...j, log: exists(j.logFile) ? stripAnsi(fs.readFileSync(j.logFile, 'utf8')).slice(-4000) : '' }; },
   'GET /api/fs': ({ path: dir }) => listDirs(dir),
-  'POST /api/settings': ({ maxParallel, projectsRoot }) => {
+  'POST /api/settings': ({ maxParallel, projectsRoot, stallMinutes: minutes }) => {
+    if (minutes !== undefined) { if (!Number.isFinite(Number(minutes)) || Number(minutes) <= 0 || Number(minutes) > 10080) throw new Error('stallMinutes 必须是 0–10080 之间的正数'); config.stallMinutes = Number(minutes); }
     if (maxParallel) config.maxParallel = Math.max(1, Math.min(5, +maxParallel));
     if (projectsRoot) config.projectsRoot = projectsRoot;
     saveConfig(); pump(); return snapshot();
@@ -3316,7 +3507,7 @@ const routes = {
     if (status === 'done') delete st.feedback[key];
     saveState(p, st); setStoryStatus(p, key, status); advanceWorkflow(p); autoDispatch(p); return snapshot();
   },
-  'POST /api/cancel': ({ runId }) => { cancel(runId); return { ok: true }; },
+  'POST /api/cancel': ({ runId }) => { cancel(runId, P(stallWatches.get(runId)?.project || runProjects.get(runId) || needProject().root)); return { ok: true }; },
   'POST /api/pty/resize': ({ id, cols, rows }) => {
     if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols < 2 || cols > 500 || rows < 2 || rows > 300) throw new Error('终端尺寸必须为整数（列 2–500，行 2–300）');
     activePty(id).resize(cols, rows); return { ok: true };
@@ -3345,7 +3536,7 @@ const routes = {
       const f = devtaskFiles(devtask), log = exists(f.log) ? fs.readFileSync(f.log, 'utf8') : '';
       return { log, logBytes: Buffer.byteLength(log, 'utf8'), task: readMd(f.task), result: devtaskMessage(devtask) || null, run: publicDevtask(devtask) };
     }
-    const p = needProject(), r = loadState(p).runs.find(x => x.id === id);
+    const p = P(stallWatches.get(id)?.project || runProjects.get(id) || needProject().root), r = loadState(p).runs.find(x => x.id === id);
     if (!r) throw new Error('没有这个运行');
     const f = runFiles(p, r);
     const log = exists(f.log) ? fs.readFileSync(f.log, 'utf8') : '';
@@ -3395,7 +3586,10 @@ const server = http.createServer(async (req, res) => {
   } catch (e) { send(res, 400, { error: e.message }); }
 });
 server.on('error', e => { console.error(e.code === 'EADDRINUSE' ? `端口 ${PORT} 已被占用（面板可能已经在运行）` : e.message); process.exit(1); });
-server.listen(PORT, '127.0.0.1', () => {
+server.listen(PORT, '127.0.0.1', async () => {
+  await refreshSystemProxy();
+  const proxyTimer = setInterval(() => { void refreshSystemProxy(); }, 5 * 60000); proxyTimer.unref();
+  const stallTimer = setInterval(() => { try { checkStalledRuns(); } catch (e) { console.error('stall check:', e.message); } }, 30000); stallTimer.unref();
   recoverDevtasks();
   recoverScheduledRuns();
   const schedulerTimer = setInterval(() => { try { schedulerCheck(); } catch (e) { console.error('scheduler:', e.message); } }, 30000); schedulerTimer.unref();

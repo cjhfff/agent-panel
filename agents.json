@@ -45,6 +45,12 @@
         "{perm}",
         "-C",
         "{cwd}",
+        "-c",
+        "model_providers.panel_legacy_codex.request_max_retries=10",
+        "-c",
+        "model_providers.panel_legacy_codex.stream_max_retries=20",
+        "-c",
+        "model_providers.panel_legacy_codex.stream_idle_timeout_ms=600000",
         "{prompt}"
       ],
       "permission": "max",
